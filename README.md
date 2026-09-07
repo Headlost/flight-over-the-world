@@ -28,7 +28,9 @@ Na telefonie użyj drążka dotykowego. W multiplayer wyślij znajomemu link do 
 
 ### Spadochroniarz
 
-W karuzeli pojazdów wybierz **Parachutist**. Czasza leci z prędkością około 24–55 km/h: `A/D` steruje zakrętem, `W` przyspiesza opadanie, a `S` wykonuje flarę i zwalnia. Przyziemienie na rozpoznanej powierzchni ulicy lub płaskiego dachu jest bezpieczne i automatycznie przełącza postać na chodzenie. Na ziemi `W/S` porusza postać, `A/D` obraca, a `Shift` uruchamia bieg. Zejście z wysokiej krawędzi ponownie otwiera czaszę. `Spacja` lub przycisk **Relaunch** rozpoczyna kontrolowane wznoszenie i pozwala kontynuować lot.
+W karuzeli pojazdów wybierz **Parachutist**. Czasza leci z prędkością około 24–55 km/h: `A/D` steruje zakrętem, `S` zwiększa opadanie i jednocześnie zmniejsza prędkość poziomą, a `W` wypłaszcza tor lotu. Tuż nad powierzchnią działa automatyczne wyhamowanie opadania ułatwiające przyziemienie. Maksymalne przybliżenie kółkiem myszy przełącza widok pierwszoosobowy z rękami i linkami sterowniczymi. Przyziemienie na rozpoznanej powierzchni ulicy lub płaskiego dachu jest bezpieczne i automatycznie przełącza postać na chodzenie. Na ziemi `W/S` porusza postać, `A/D` obraca, a `Shift` uruchamia bieg. Zejście z wysokiej krawędzi ponownie otwiera czaszę. `Spacja` lub przycisk **Relaunch** rozpoczyna kontrolowane wznoszenie i pozwala kontynuować lot.
+
+Podczas zejścia poniżej 120 m gra zaczyna wcześniej pobierać dokładniejsze kafelki. Po lądowaniu przełącza teren na profil szczegółów ulicznych i powiększa pamięć podręczną, aby otoczenie szybciej osiągnęło jakość zbliżoną do widoku ulicznego.
 
 ## Grafika
 

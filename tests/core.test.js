@@ -105,6 +105,29 @@ test('parachutist leaves a roof as flight instead of crashing', () => {
   assert.equal(pilot.crashed, false);
 });
 
+test('terrain LOD changes keep a stationary parachutist grounded', () => {
+  const pilot = new ParachutistController(52, 16, 120, 0);
+  pilot.land(120);
+  pilot.settleOnSurface(105);
+  assert.equal(pilot.state, 'grounded');
+  assert.equal(pilot.height, 105);
+});
+
+test('S makes the parachutist descend faster while reducing horizontal speed', () => {
+  const neutral = new ParachutistController(52, 16, 100, 0);
+  const descending = new ParachutistController(52, 16, 100, 0);
+  for (let i = 0; i < 180; i++) {
+    neutral.update(1 / 60, {roll:0,pitch:0,throttle:0});
+    descending.update(1 / 60, {roll:0,pitch:1,throttle:0});
+  }
+  assert.ok(descending.height < neutral.height - 4);
+  assert.ok(descending.speed < neutral.speed);
+  descending.setGroundClearance(2);
+  const before = descending.verticalSpeed;
+  for (let i = 0; i < 60; i++) descending.update(1 / 60, {roll:0,pitch:1,throttle:0});
+  assert.ok(descending.verticalSpeed > before);
+});
+
 test('shared model resources are freed exactly once and detached', () => {
   const parent = new Group(), root = new Group(), geometry = new BoxGeometry(), texture = new Texture();
   const material = new MeshBasicMaterial({map:texture});

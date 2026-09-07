@@ -2,6 +2,7 @@ import {
   AnimationMixer,
   Box3,
   BufferGeometry,
+  DynamicDrawUsage,
   Float32BufferAttribute,
   Group,
   LineBasicMaterial,
@@ -9,12 +10,63 @@ import {
   MathUtils,
   Mesh,
   MeshStandardMaterial,
+  Matrix4,
   Vector3,
 } from "three";
 
 const R_EARTH = 6378137;
 const WALK_SPEED = 1.65;
 const RUN_SPEED = 4.8;
+const _skinVertex = new Vector3();
+
+function createStableCharacter(character) {
+  character.updateMatrixWorld(true);
+  const proxy = new Group();
+  proxy.name = "stable-character";
+  const skins = [];
+  character.traverse((source) => {
+    if (!source.isSkinnedMesh || !source.geometry?.attributes?.position) return;
+    const geometry = source.geometry.clone();
+    geometry.deleteAttribute("skinIndex");
+    geometry.deleteAttribute("skinWeight");
+    geometry.getAttribute("position").setUsage(DynamicDrawUsage);
+    const mesh = new Mesh(geometry, source.material);
+    mesh.castShadow = true;
+    mesh.receiveShadow = true;
+    proxy.add(mesh);
+    skins.push({
+      source,
+      mesh,
+      sourcePosition: source.geometry.getAttribute("position"),
+      outputPosition: geometry.getAttribute("position"),
+      localMatrix: new Matrix4().copy(source.matrixWorld),
+    });
+  });
+  character.visible = skins.length === 0;
+  return { proxy, skins, character, frame: 0, elapsed: 1 };
+}
+
+function updateStableCharacter(stable, dt = 0, force = false) {
+  if (!stable?.skins?.length) return;
+  stable.elapsed += dt;
+  if (!force && stable.elapsed < 1 / 20) return;
+  stable.elapsed = 0;
+  stable.frame += 1;
+  stable.character.updateMatrixWorld(true);
+  for (const skin of stable.skins) {
+    for (let i = 0; i < skin.sourcePosition.count; i++) {
+      _skinVertex.fromBufferAttribute(skin.sourcePosition, i);
+      skin.source.applyBoneTransform(i, _skinVertex).applyMatrix4(skin.localMatrix);
+      skin.outputPosition.setXYZ(i, _skinVertex.x, _skinVertex.y, _skinVertex.z);
+    }
+    skin.outputPosition.needsUpdate = true;
+    if (stable.frame % 10 === 0) skin.mesh.geometry.computeVertexNormals();
+    if (force) {
+      skin.mesh.geometry.computeBoundingSphere();
+      if (skin.mesh.geometry.boundingSphere) skin.mesh.geometry.boundingSphere.radius *= 1.5;
+    }
+  }
+}
 
 function createCanopy() {
   const group = new Group();
@@ -101,9 +153,12 @@ export function createParachutistModel(gltf) {
   const mixer = new AnimationMixer(character);
   const actions = new Map();
   for (const clip of gltf.animations || []) actions.set(clip.name.toLowerCase(), mixer.clipAction(clip));
-  root.userData.parachutist = { mixer, actions, active: null, canopy };
+  const stable = createStableCharacter(character);
+  root.add(stable.proxy);
+  root.userData.parachutist = { mixer, actions, active: null, canopy, character, stable };
   root.userData.key = "parachutist";
   setParachutistState(root, "airborne", 0, true);
+  updateStableCharacter(stable, 0, true);
   return root;
 }
 
@@ -135,7 +190,20 @@ export function updateParachutistModel(root, state, speed, dt) {
   setParachutistState(root, state, speed);
   const action = rig.actions.get(rig.active);
   if (action) action.timeScale = rig.active === "walk" ? MathUtils.clamp(speed / WALK_SPEED, 0.65, 1.8) : rig.active === "run" ? MathUtils.clamp(speed / RUN_SPEED, 0.7, 1.5) : 0.65;
-  rig.mixer.update(Math.min(0.05, Math.max(0, dt)));
+  const stateChanged = rig.renderState !== state;
+  rig.renderState = state;
+  if (state === "grounded") {
+    rig.mixer.update(Math.min(0.05, Math.max(0, dt)));
+    updateStableCharacter(rig.stable, dt);
+  } else if (stateChanged) {
+    rig.mixer.update(0);
+    updateStableCharacter(rig.stable, 0, true);
+  }
+}
+
+export function setParachutistFirstPerson(root, enabled) {
+  const rig = root?.userData?.parachutist;
+  if (rig?.stable?.proxy) rig.stable.proxy.visible = !enabled;
 }
 
 function advance(controller, distance) {
@@ -170,6 +238,7 @@ export class ParachutistController {
     this.verticalSpeed = -1.35;
     this.state = "airborne";
     this.groundHeight = null;
+    this.groundClearance = Infinity;
     this.launchTarget = null;
     this.previousGroundPose = null;
     this.crashed = false;
@@ -209,18 +278,19 @@ export class ParachutistController {
       return;
     }
 
-    const speedInput = ctrl.throttle !== 0 ? ctrl.throttle : -ctrl.pitch;
-    const targetSpeed = speedInput > 0.05 ? this.cruise + (this.boost - this.cruise) * speedInput
-      : speedInput < -0.05 ? this.cruise + (this.cruise - this.brake) * speedInput
-      : this.cruise;
+    const descend = Math.max(0, MathUtils.clamp(ctrl.pitch, -1, 1));
+    const flatten = Math.max(0, -MathUtils.clamp(ctrl.pitch, -1, 1));
+    let targetSpeed = ctrl.throttle > 0 ? this.boost : ctrl.throttle < 0 ? this.brake : this.cruise;
+    targetSpeed += (this.brake - targetSpeed) * descend;
+    targetSpeed += (this.cruise * 0.92 - targetSpeed) * flatten;
     this.speed += (targetSpeed - this.speed) * (1 - Math.exp(-2.4 * dt));
     this.speed = MathUtils.clamp(this.speed, this.brake, this.boost);
     const targetRoll = -ctrl.roll * 0.68;
     this.roll += (targetRoll - this.roll) * (1 - Math.exp(-3.8 * dt));
     this.heading = MathUtils.euclideanModulo(this.heading - Math.tan(this.roll) * 0.58 * dt, Math.PI * 2);
     const fast = Math.max(0, (this.speed - this.cruise) / (this.boost - this.cruise));
-    const flare = Math.max(0, (this.cruise - this.speed) / (this.cruise - this.brake));
-    const targetSink = -(1.2 + fast * fast * 2.25 - flare * 0.18 + Math.abs(this.roll) * 0.35);
+    let targetSink = -(1.15 + descend * 2.85 + fast * fast * 1.65 + Math.abs(this.roll) * 0.35 - flatten * 0.28);
+    if (this.groundClearance < 8) targetSink = Math.max(targetSink, -0.62 - this.groundClearance * 0.1);
     this.verticalSpeed += (targetSink - this.verticalSpeed) * (1 - Math.exp(-2.5 * dt));
     this.height += this.verticalSpeed * dt;
     this.pitch += (Math.atan2(this.verticalSpeed, this.speed) - this.pitch) * (1 - Math.exp(-3 * dt));
@@ -232,6 +302,7 @@ export class ParachutistController {
     this.state = "grounded";
     this.height = surfaceHeight;
     this.groundHeight = surfaceHeight;
+    this.groundClearance = 0;
     this.launchTarget = null;
     this.speed = 0;
     this.verticalSpeed = 0;
@@ -244,6 +315,7 @@ export class ParachutistController {
     this.state = "launching";
     this.groundHeight = surfaceHeight;
     this.launchTarget = surfaceHeight + 80;
+    this.groundClearance = Infinity;
     this.speed = 4;
     this.verticalSpeed = 2.5;
     return true;
@@ -252,13 +324,14 @@ export class ParachutistController {
   settleOnSurface(surfaceHeight) {
     if (this.state !== "grounded" || !Number.isFinite(surfaceHeight)) return;
     const delta = surfaceHeight - this.height;
-    if (delta < -1.5) {
+    const moving = Math.abs(this.speed) > 0.2;
+    if (delta < -1.5 && moving) {
       this.state = "airborne";
       this.verticalSpeed = -0.8;
       this.speed = Math.max(this.speed, this.brake);
       return;
     }
-    if (delta > 0.9) {
+    if (delta > 0.9 && moving) {
       if (this.previousGroundPose) {
         this.lat = this.previousGroundPose.lat;
         this.lon = this.previousGroundPose.lon;
@@ -268,6 +341,10 @@ export class ParachutistController {
     }
     this.height = surfaceHeight;
     this.groundHeight = surfaceHeight;
+  }
+
+  setGroundClearance(clearance) {
+    if (Number.isFinite(clearance)) this.groundClearance = Math.max(0, clearance);
   }
 
   get latDeg() { return this.lat * MathUtils.RAD2DEG; }

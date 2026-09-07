@@ -37,8 +37,10 @@ import {
   Group,
   Mesh,
   MeshBasicMaterial,
+  MeshStandardMaterial,
   ConeGeometry,
   CylinderGeometry,
+  SphereGeometry,
 } from "three";
 import { DRACOLoader } from "three/addons/loaders/DRACOLoader.js";
 import { GLTFLoader } from "three/addons/loaders/GLTFLoader.js";
@@ -47,6 +49,7 @@ import { createPlaneMesh, PlaneController } from "./game/plane.js";
 import {
   createParachutistModel,
   ParachutistController,
+  setParachutistFirstPerson,
   setParachutistState,
   updateParachutistModel,
 } from "./game/paraglider.js";
@@ -73,6 +76,48 @@ function prepareRocket(model) {
 function prepareJet(model) {
   model.rotation.y = Math.PI;
   return model;
+}
+
+function createFirstPersonArms() {
+  const rig = new Group();
+  const sleeve = new MeshStandardMaterial({ color: 0x4b5d3b, roughness: 0.88 });
+  const glove = new MeshStandardMaterial({ color: 0x1b2024, roughness: 0.72 });
+  const strap = new MeshStandardMaterial({ color: 0xd8dde2, roughness: 0.75 });
+  const arms = [];
+  const lines = [];
+  for (const side of [-1, 1]) {
+    const upper = new Mesh(new CylinderGeometry(0.095, 0.12, 0.58, 10), sleeve);
+    upper.position.set(side * 0.29, -0.28, -0.48);
+    upper.rotation.set(-1.02, 0, -side * 0.22);
+    const forearm = new Mesh(new CylinderGeometry(0.075, 0.095, 0.55, 10), sleeve);
+    forearm.position.set(side * 0.31, -0.4, -0.84);
+    forearm.rotation.set(-1.24, 0, -side * 0.1);
+    const hand = new Mesh(new SphereGeometry(0.105, 12, 8), glove);
+    hand.position.set(side * 0.31, -0.48, -1.12);
+    const brakeLine = new Mesh(new CylinderGeometry(0.009, 0.009, 1.3, 5), strap);
+    brakeLine.position.set(side * 0.31, 0.11, -1.12);
+    rig.add(upper, forearm, hand, brakeLine);
+    arms.push({ forearm, hand });
+    lines.push(brakeLine);
+  }
+  rig.userData.arms = arms;
+  rig.userData.lines = lines;
+  rig.scale.setScalar(0.68);
+  rig.position.y = -0.12;
+  rig.visible = false;
+  return rig;
+}
+
+function updateFirstPersonArms(rig, controls, dt, state) {
+  if (!rig?.userData?.arms) return;
+  const brake = Math.max(0, controls.pitch);
+  for (const line of rig.userData.lines || []) line.visible = state !== "grounded";
+  for (const [index, arm] of rig.userData.arms.entries()) {
+    const steering = controls.roll * (index === 0 ? -1 : 1);
+    const target = -1.24 + brake * 0.32 + Math.max(0, steering) * 0.24;
+    arm.forearm.rotation.x += (target - arm.forearm.rotation.x) * Math.min(1, dt * 9);
+    arm.hand.position.y = -0.48 - brake * 0.18 - Math.max(0, steering) * 0.12;
+  }
 }
 import {
   distanceM,
@@ -213,7 +258,7 @@ const GUESS_TIME = 60; // 1 min na rozpoznanie terenu
 const HOME_CAPTURE_M = 600;
 const HOME_BEACON_M = 1000;
 
-let camera, scene, renderer, tiles, sun, sky;
+let camera, scene, renderer, tiles, sun, sky, firstPersonRig;
 let planeMesh, plane, beacon;
 let groundAlt = TERRAIN_ALT;
 let crashed = false;
@@ -253,6 +298,8 @@ const liteMode = isMobile;
 if (liteMode) document.body.classList.add("lite");
 let loadError = null;
 let frameCount = 0;
+let firstPersonActive = false;
+let terrainDetailMode = "normal";
 let selectedPlane = "pa28";
 let menuOpen = true;
 let paused = false;
@@ -338,6 +385,10 @@ const ctrl = { roll: 0, pitch: 0, throttle: 0 };
 const keys = new Set();
 const raycaster = new Raycaster();
 raycaster.firstHitOnly = true;
+const cameraRaycaster = new Raycaster();
+cameraRaycaster.firstHitOnly = true;
+const cameraCollisionDir = new Vector3();
+let cameraObstacleDistance = null;
 const clock = new Clock();
 
 const el = {
@@ -1564,6 +1615,9 @@ function init() {
   scene.add(sun.target);
 
   camera = new PerspectiveCamera(70, innerWidth / innerHeight, 1, 2e6);
+  firstPersonRig = createFirstPersonArms();
+  camera.add(firstPersonRig);
+  scene.add(camera);
 
   tiles = new TilesRenderer();
   if (ION_KEY) {
@@ -2407,13 +2461,24 @@ function applyQuality() {
   renderer.shadowMap.enabled = q.shadows;
   if (sun) sun.castShadow = q.shadows;
   if (tiles) {
-    tiles.errorTarget = q.error;
-    tiles.lruCache.maxSize = 2400;
-    tiles.lruCache.minSize = 1200;
-    tiles.lruCache.maxBytesSize = q.bytes;
-    tiles.lruCache.minBytesSize = q.bytes * 0.65;
-    tiles.setResolutionFromRenderer(camera, renderer);
+    terrainDetailMode = "";
+    setTerrainDetail("normal");
   }
+}
+
+function setTerrainDetail(modeName) {
+  if (!tiles || modeName === terrainDetailMode) return;
+  terrainDetailMode = modeName;
+  const q = QUALITY[settings.quality];
+  const landing = modeName === "landing";
+  const street = modeName === "street";
+  tiles.errorTarget = street ? Math.min(q.error, isMobile ? 4 : 2) : landing ? Math.min(q.error, 4) : q.error;
+  tiles.lruCache.maxSize = street ? (isMobile ? 2800 : 4200) : landing ? 3200 : 2400;
+  tiles.lruCache.minSize = Math.round(tiles.lruCache.maxSize * 0.5);
+  const bytes = street ? Math.max(q.bytes, isMobile ? 420e6 : 900e6) : landing ? Math.max(q.bytes, 600e6) : q.bytes;
+  tiles.lruCache.maxBytesSize = bytes;
+  tiles.lruCache.minBytesSize = bytes * 0.6;
+  tiles.setResolutionFromRenderer(camera, renderer);
 }
 init();
 animate();
@@ -2595,11 +2660,28 @@ function tickFrame() {
   // sztywna kamera za samolotem — tylko kurs, bez przechyłu/pochylenia
   const camFrame = frameAt(plane.lat, plane.lon, plane.height, plane.heading, 0, 0);
   camFrame.decompose(camFramePos, camFrameQuat, camFrameScale);
+  const firstPerson = selectedPlane === "parachutist" && !menuOpen && orbit.zoom <= 0.56;
+  if (firstPerson !== firstPersonActive) {
+    firstPersonActive = firstPerson;
+    camInit = false;
+    camera.near = firstPerson ? 0.05 : 1;
+    camera.updateProjectionMatrix();
+  }
+  if (firstPersonRig) {
+    firstPersonRig.visible = firstPerson;
+    updateFirstPersonArms(firstPersonRig, ctrl, dt, plane.state);
+  }
+  setParachutistFirstPerson(planeMesh, firstPerson);
   const cameraProfile = selectedPlane === "parachutist" && plane.state === "grounded" ? [0, 2.4, 5.5] : camOffset;
-  const radius = Math.hypot(cameraProfile[1], cameraProfile[2]) * orbit.zoom;
-  offset.set(Math.sin(orbit.yaw) * Math.cos(orbit.pitch) * radius, Math.sin(orbit.pitch) * radius, Math.cos(orbit.yaw) * Math.cos(orbit.pitch) * radius).applyQuaternion(camFrameQuat).add(planePos);
-  if (!camInit) camPos.copy(offset);
-  else camPos.lerp(offset, 1 - Math.exp(-12 * dt));
+  if (firstPerson) {
+    offset.set(0, 1.58, 0.08).applyQuaternion(camFrameQuat).add(planePos);
+    camPos.copy(offset);
+  } else {
+    const radius = Math.hypot(cameraProfile[1], cameraProfile[2]) * orbit.zoom;
+    offset.set(Math.sin(orbit.yaw) * Math.cos(orbit.pitch) * radius, Math.sin(orbit.pitch) * radius, Math.cos(orbit.yaw) * Math.cos(orbit.pitch) * radius).applyQuaternion(camFrameQuat).add(planePos);
+    if (!camInit) camPos.copy(offset);
+    else camPos.lerp(offset, 1 - Math.exp(-12 * dt));
+  }
   camInit = true;
   camera.position.copy(camPos);
   // trzęsienie kamery po wybuchu
@@ -2610,7 +2692,30 @@ function tickFrame() {
     camera.position.y += (Math.random() - 0.5) * s;
     camera.position.z += (Math.random() - 0.5) * s;
   }
-  camTarget.set(0, selectedPlane === "parachutist" && plane.state === "grounded" ? 1.1 : 0.5, -cameraProfile[2] * 0.4).applyQuaternion(camFrameQuat).add(planePos);
+  if (firstPerson) {
+    const cosPitch = Math.cos(orbit.pitch);
+    camTarget.set(Math.sin(orbit.yaw) * cosPitch * 30, 1.58 - Math.sin(orbit.pitch) * 30, -Math.cos(orbit.yaw) * cosPitch * 30).applyQuaternion(camFrameQuat).add(planePos);
+  } else {
+    camTarget.set(0, selectedPlane === "parachutist" && plane.state === "grounded" ? 1.1 : 0.5, -cameraProfile[2] * 0.4).applyQuaternion(camFrameQuat).add(planePos);
+  }
+  if (selectedPlane === "parachutist" && plane.state === "grounded" && !firstPerson) {
+    cameraCollisionDir.copy(camPos).sub(camTarget);
+    const desiredDistance = cameraCollisionDir.length();
+    if (desiredDistance > 0.1) {
+      cameraCollisionDir.multiplyScalar(1 / desiredDistance);
+      if (frameCount % 3 === 0 || cameraObstacleDistance == null) {
+        cameraRaycaster.set(camTarget, cameraCollisionDir);
+        cameraRaycaster.far = desiredDistance;
+        const obstruction = cameraRaycaster.intersectObject(tiles.group, true)[0];
+        cameraObstacleDistance = obstruction ? Math.max(0.8, obstruction.distance - 0.3) : desiredDistance;
+      }
+      const safeDistance = Math.min(desiredDistance, cameraObstacleDistance ?? desiredDistance);
+      camPos.copy(camTarget).addScaledVector(cameraCollisionDir, safeDistance);
+      camera.position.copy(camPos);
+    }
+  } else {
+    cameraObstacleDistance = null;
+  }
   camera.up.set(0, 1, 0).applyQuaternion(camFrameQuat); // lokalny pion, nie globalny Y
   camera.lookAt(camTarget);
 
@@ -2660,6 +2765,7 @@ function tickFrame() {
           }
         }
       } else if (selectedPlane === "parachutist") {
+        plane.setGroundClearance?.(plane.height - gh);
         if (plane.state === "grounded") plane.settleOnSurface(gh);
         else if (plane.state === "airborne" && plane.verticalSpeed <= 0 && plane.height <= gh + 0.65) plane.land(gh);
       }
@@ -2680,6 +2786,9 @@ function tickFrame() {
     else finishSnapStart();
   }
   const agl = plane.height - groundAlt;
+  setTerrainDetail(selectedPlane === "parachutist" && !menuOpen
+    ? plane.state === "grounded" ? "street" : agl < 120 ? "landing" : "normal"
+    : "normal");
   // bez kolizji podczas dosadzania — pomiar gruntu jeszcze się doprecyzowuje
   if (selectedPlane !== "parachutist" && flying && !pendingSnap && (agl < 4 || (frameCount % 4 === 0 && wingHit()))) {
     crash();
@@ -2753,7 +2862,7 @@ function tickFrame() {
   if (frameCount % 30 === 0) {
     const canvas = renderer.domElement;
     flightStatus.hidden = menuOpen;
-    flightStatus.textContent = loadError || QUALITY[settings.quality].label + ' · ' + canvas.width + ' × ' + canvas.height + ' · ' + Math.round(1 / Math.max(rawDt,0.001)) + ' FPS' + (tiles.isLoading ? ' · Streaming terrain…' : '');
+    flightStatus.textContent = loadError || QUALITY[settings.quality].label + ' · ' + canvas.width + ' × ' + canvas.height + ' · ' + Math.round(1 / Math.max(rawDt,0.001)) + ' FPS' + (terrainDetailMode === 'street' && tiles.isLoading ? ' · Loading street detail…' : tiles.isLoading ? ' · Streaming terrain…' : '');
     renderAttributions(credits, tiles.getAttributions([]));
     if (tiles.visibleTiles.size) {
       const source = document.createElement('span'); source.textContent = 'Terrain: Google Maps'; credits.prepend(source);
@@ -2797,6 +2906,8 @@ function tickFrame() {
     poses: mp.poses.size,
     mates: mateDbg,
     movementState: plane.state || "airborne",
+    firstPerson: firstPersonActive,
+    terrainDetailMode,
   };
   window.__cam = camera;
   window.__planeMesh = planeMesh;
@@ -2828,10 +2939,10 @@ function updateHud(agl) {
   if (selectedPlane === "parachutist" && !menuOpen) {
     movementStatus.hidden = false;
     movementStatus.textContent = plane.state === "grounded"
-      ? "ON FOOT · W/S walk · A/D turn · Shift run · Space relaunch"
+      ? "ON FOOT · W/S walk · A/D turn · Shift run · zoom in for first-person · Space relaunch"
       : plane.state === "launching"
         ? "RELAUNCHING · steer with A/D"
-        : "CANOPY · steer with A/D · W faster descent · S flare";
+        : "CANOPY · A/D steer · S descend + slow · W flatten · zoom in for first-person";
   } else {
     movementStatus.hidden = true;
   }
