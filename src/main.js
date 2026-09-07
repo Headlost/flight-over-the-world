@@ -44,6 +44,12 @@ import { DRACOLoader } from "three/addons/loaders/DRACOLoader.js";
 import { GLTFLoader } from "three/addons/loaders/GLTFLoader.js";
 import { setLoader, hideLoader } from "./game/hud.js";
 import { createPlaneMesh, PlaneController } from "./game/plane.js";
+import {
+  createParachutistModel,
+  ParachutistController,
+  setParachutistState,
+  updateParachutistModel,
+} from "./game/paraglider.js";
 import { applyRotorState, spinRotors } from "./game/rotors.js";
 import { createCarousel } from "./game/menuPreview.js";
 import { createSky, SUN_DIR } from "./game/sky.js";
@@ -189,8 +195,18 @@ const PLANES = {
     sound: "rocket",
     prepare: prepareRocket,
   },
+  parachutist: {
+    file: asset("models/parachutist.glb"),
+    wingspan: 9.2,
+    cruise: 10.5, boost: 15.3, brake: 6.7,
+    cam: [0, 3.5, 11],
+    name: "Parachutist",
+    desc: "Land on roofs or streets · walk, run and relaunch",
+    sound: "wind",
+    build: createParachutistModel,
+  },
 };
-const PLANE_ORDER = ["pa28", "q400", "citation", "jet", "rocket"];
+const PLANE_ORDER = ["pa28", "q400", "citation", "jet", "rocket", "parachutist"];
 
 const HOME_TIME = 600; // 10 min na dolot do domu
 const GUESS_TIME = 60; // 1 min na rozpoznanie terenu
@@ -381,6 +397,7 @@ const el = {
   touchBoost: document.getElementById("touch-boost"),
   touchBrake: document.getElementById("touch-brake"),
   touchTalk: document.getElementById("touch-talk"),
+  touchAction: document.getElementById("touch-action"),
   lobbyCarCanvas: document.getElementById("lobby-carousel-canvas"),
   lobbyCarPrev: document.getElementById("lobby-car-prev"),
   lobbyCarNext: document.getElementById("lobby-car-next"),
@@ -398,6 +415,8 @@ const planePreviewItems = PLANE_ORDER.map((k) => ({
   file: PLANES[k].file,
   wingspan: PLANES[k].wingspan,
   prepare: PLANES[k].prepare,
+  build: PLANES[k].build,
+  update: k === "parachutist" ? (model, dt) => updateParachutistModel(model, "airborne", 0, dt) : null,
 }));
 const carousel = createCarousel(el.carCanvas, planePreviewItems, { mobile: isMobile });
 let lobbyCarousel = createCarousel(el.lobbyCarCanvas, planePreviewItems, {
@@ -424,6 +443,7 @@ function selectPlane(i, dir, silent = false) {
   el.carDesc.textContent = spec.desc;
   el.lobbyCarName.textContent = spec.name;
   el.lobbyCarDesc.textContent = spec.desc;
+  document.body.classList.toggle("parachutist-selected", selectedPlane === "parachutist");
   if (!silent && mp.active && mp.net) {
     mp.net.send({ t: "plane", plane: selectedPlane, from: mp.myId });
     renderLobby();
@@ -1195,6 +1215,8 @@ function pushMatePose(id, data) {
     heading: data.heading,
     pitch: data.pitch,
     roll: data.roll,
+    state: data.state || "airborne",
+    motion: data.motion || 0,
   });
   if (track.samples.length > 24) track.samples.splice(0, track.samples.length - 24);
 }
@@ -1204,7 +1226,7 @@ function seedMatePose(id, lat, lon, h, planeKey) {
   loadMate(id, planeKey || "pa28");
   mp.poses.set(id, {
     seq: -1,
-    samples: [{ at: performance.now(), lat, lon, h, heading: 0, pitch: 0, roll: 0 }],
+    samples: [{ at: performance.now(), lat, lon, h, heading: 0, pitch: 0, roll: 0, state: "airborne", motion: 0 }],
     clockOff: null,
     plane: planeKey,
   });
@@ -1320,7 +1342,8 @@ function tryReleaseGo() {
 }
 
 function snapAgl() {
-  return mode === "guess" ? 350 : 320;
+  if (mode === "guess") return 350;
+  return selectedPlane === "parachutist" ? 140 : 320;
 }
 
 function spawnHoldAlt() {
@@ -1331,7 +1354,8 @@ function spawnHoldAlt() {
 function isTerrainSnap(s) {
   if (!s || !Number.isFinite(s.h) || !Number.isFinite(s.gh)) return false;
   if (s.probed === false) return false;
-  if (Math.abs(s.h - s.gh - snapAgl()) > 100) return false;
+  const agl = s.h - s.gh;
+  if (agl < 60 || agl > 500) return false;
   if (Math.abs(s.h - spawnHoldAlt()) < 300) return false;
   return true;
 }
@@ -1363,6 +1387,10 @@ function applyGo(msg) {
     ctrl.roll = 0;
     ctrl.pitch = 0;
     groundAlt = payload.gh ?? payload.h - snapAgl();
+    if (plane instanceof ParachutistController) {
+      plane.state = "airborne";
+      plane.verticalSpeed = -1.2;
+    }
   }
   camInit = false;
   mp.goAt = performance.now();
@@ -1633,13 +1661,15 @@ function loadPlane(key) {
 
   new GLTFLoader().load(spec.file, (gltf) => {
     if (planeMesh !== placeholder) { disposeModel(gltf.scene); return; }
-    const model = gltf.scene;
-    if (spec.prepare) spec.prepare(model); // np. poza czarownicy + miotła
-    const box = new Box3().setFromObject(model);
-    const size = box.getSize(new Vector3());
-    model.scale.setScalar(spec.wingspan / Math.max(size.x, size.y, size.z));
-    box.setFromObject(model);
-    model.position.sub(box.getCenter(new Vector3()));
+    const model = spec.build ? spec.build(gltf) : gltf.scene;
+    if (spec.prepare) spec.prepare(model);
+    if (!spec.build) {
+      const box = new Box3().setFromObject(model);
+      const size = box.getSize(new Vector3());
+      model.scale.setScalar(spec.wingspan / Math.max(size.x, size.y, size.z));
+      box.setFromObject(model);
+      model.position.sub(box.getCenter(new Vector3()));
+    }
     model.traverse((o) => {
       if (o.isMesh && o.material) {
         o.material.metalness = 0.15;
@@ -1647,8 +1677,8 @@ function loadPlane(key) {
         o.castShadow = true;
       }
     });
-    const wrapper = new Group();
-    wrapper.add(model);
+    const wrapper = spec.build ? model : new Group();
+    if (!spec.build) wrapper.add(model);
     wrapper.userData.prop = null;
     wrapper.userData.key = key;
     applyRotorState(wrapper, true);
@@ -1656,6 +1686,7 @@ function loadPlane(key) {
     disposeModel(planeMesh);
     planeMesh = wrapper;
     scene.add(planeMesh);
+    if (key === "parachutist" && plane) setParachutistState(planeMesh, plane.state, Math.abs(plane.speed), true);
   });
 }
 
@@ -1711,13 +1742,15 @@ function loadMate(id, key) {
   new GLTFLoader().load(spec.file, (gltf) => {
     const cur = mp.mates.get(id);
     if (!cur || cur.mesh !== placeholder) { disposeModel(gltf.scene); return; }
-    const model = gltf.scene;
+    const model = spec.build ? spec.build(gltf) : gltf.scene;
     if (spec.prepare) spec.prepare(model);
-    const box = new Box3().setFromObject(model);
-    const size = box.getSize(new Vector3());
-    model.scale.setScalar(spec.wingspan / Math.max(size.x, size.y, size.z));
-    box.setFromObject(model);
-    model.position.sub(box.getCenter(new Vector3()));
+    if (!spec.build) {
+      const box = new Box3().setFromObject(model);
+      const size = box.getSize(new Vector3());
+      model.scale.setScalar(spec.wingspan / Math.max(size.x, size.y, size.z));
+      box.setFromObject(model);
+      model.position.sub(box.getCenter(new Vector3()));
+    }
     model.traverse((o) => {
       if (o.isMesh && o.material) {
         o.material.metalness = 0.15;
@@ -1725,8 +1758,8 @@ function loadMate(id, key) {
         o.castShadow = true;
       }
     });
-    const wrapper = new Group();
-    wrapper.add(model);
+    const wrapper = spec.build ? model : new Group();
+    if (!spec.build) wrapper.add(model);
     wrapper.userData.key = key;
     wrapper.visible = cur.mesh.visible;
     applyRotorState(wrapper, true);
@@ -1743,7 +1776,9 @@ function resetFlight(latDeg, lonDeg) {
   // wysoki spawn poza nizinną Polską, żeby nie trafić w góry zanim teren się zmierzy
   // (menu i tak zostaje do czasu dosadzenia — spawn jest niewidoczny)
   const spawnAlt = mode === "guess" ? guessHoldAlt(guessScope) : 6000;
-  plane = new PlaneController(latDeg, lonDeg, spawnAlt, 0, spec);
+  plane = selectedPlane === "parachutist"
+    ? new ParachutistController(latDeg, lonDeg, spawnAlt, 0)
+    : new PlaneController(latDeg, lonDeg, spawnAlt, 0, spec);
   groundAlt = TERRAIN_ALT;
   pendingSnap = true; // udany, ustabilizowany pomiar terenu dosadzi samolot na właściwą wysokość
   snapLastGh = null;
@@ -2196,6 +2231,7 @@ window.addEventListener("keydown", (e) => {
   if (menuOpen || paused || guessOpen) return;
   if (["arrowup","arrowdown","arrowleft","arrowright"," ","control"].includes(k)) e.preventDefault();
   if (k === "c" && !e.repeat) { orbit.yaw = 0; orbit.pitch = 0.25; orbit.zoom = 1; }
+  if (k === " " && !e.repeat) tryParachutistRelaunch();
   keys.add(k);
   if (k === "r" && (crashed || finished)) restartMode();
 });
@@ -2281,6 +2317,7 @@ if (el.stick) {
 bindHold(el.touchBoost, () => { touch.boost = true; }, () => { touch.boost = false; });
 bindHold(el.touchBrake, () => { touch.brake = true; }, () => { touch.brake = false; });
 bindHold(el.touchTalk, () => startTalk(), () => stopTalk());
+el.touchAction?.addEventListener("click", tryParachutistRelaunch);
 el.touchPause?.addEventListener("click", () => setPaused(true));
 el.stick?.addEventListener("touchmove", (e) => e.preventDefault(), { passive: false });
 
@@ -2290,10 +2327,23 @@ function syncTouchUi() {
   el.touch.classList.toggle("hidden", !show);
   el.touch.classList.toggle("show", show);
   el.touch.classList.toggle("talk", !!(mp.active && mp.net));
+  if (el.touchAction) {
+    const canLaunch = selectedPlane === "parachutist" && plane?.state === "grounded";
+    el.touchAction.disabled = !canLaunch;
+    el.touchAction.textContent = canLaunch ? "Relaunch" : plane?.state === "launching" ? "Launching…" : "Land to relaunch";
+  }
   if (!show) {
     resetStick();
     touch.boost = false;
     touch.brake = false;
+  }
+}
+
+function tryParachutistRelaunch() {
+  if (selectedPlane !== "parachutist" || !plane || menuOpen || paused || guessOpen) return;
+  if (plane.takeOff?.(groundAlt)) {
+    setParachutistState(planeMesh, plane.state, plane.speed);
+    camInit = false;
   }
 }
 
@@ -2338,6 +2388,7 @@ let camInit = false;
 
 const adaptiveQuality = new AdaptiveQuality();
 const flightStatus = document.createElement('div'); flightStatus.id = 'flight-status'; document.body.append(flightStatus);
+const movementStatus = document.createElement('div'); movementStatus.id = 'movement-status'; movementStatus.hidden = true; document.body.append(movementStatus);
 const credits = document.createElement('div'); credits.id = 'map-credits'; document.body.append(credits);
 const settingsUI = setupSettings(() => { adaptiveQuality.reset(); applyQuality(); }, () => { if (!menuOpen) setPaused(true); });
 setupLocationPicker(() => { if (!menuOpen) setPaused(true); });
@@ -2443,7 +2494,8 @@ function tickFrame() {
     1,
     Math.max(0.15, 0.22 + plane.throttle * 0.78)
   );
-  updateEngineSound(flying, rpm01, speed01, PLANES[selectedPlane].sound);
+  const movingThroughAir = selectedPlane !== "parachutist" || plane.state !== "grounded";
+  updateEngineSound(flying && movingThroughAir, rpm01, speed01, PLANES[selectedPlane].sound);
   updateMusic();
 
   // pozycja i orientacja samolotu
@@ -2455,6 +2507,7 @@ function tickFrame() {
     planeMesh.userData.prop.rotation.z += plane.speed * dt * 1.6;
   }
   spinRotors(planeMesh, dt, plane.speed);
+  if (selectedPlane === "parachutist") updateParachutistModel(planeMesh, plane.state, Math.abs(plane.speed), dt);
   for (const mate of mp.mates.values()) {
     if (mate.mesh) spinRotors(mate.mesh, dt, plane.speed);
   }
@@ -2476,6 +2529,8 @@ function tickFrame() {
         pitch: plane.pitch,
         roll: plane.roll,
         plane: selectedPlane,
+        state: plane.state,
+        motion: Math.abs(plane.speed),
       });
     }
   }
@@ -2485,7 +2540,7 @@ function tickFrame() {
     for (const [id, track] of mp.poses) {
       if (id === mp.myId) continue;
       const samples = track.samples;
-      if (!mp.mates.get(id)?.mesh) loadMate(id, track.plane || "pa28");
+      if (!mp.mates.get(id)?.mesh || mp.mates.get(id)?.key !== track.plane) loadMate(id, track.plane || "pa28");
       const mate = mp.mates.get(id);
       if (!mate?.mesh || !samples?.length) continue;
       let from = samples[0];
@@ -2520,6 +2575,11 @@ function tickFrame() {
       mate.mesh.quaternion.copy(mateQuat);
       mate.mesh.scale.copy(mateScale);
       mate.mesh.visible = true;
+      if (track.plane === "parachutist") {
+        const state = u < 0.5 ? from.state : to.state;
+        const motion = from.motion + (to.motion - from.motion) * u;
+        updateParachutistModel(mate.mesh, state || "airborne", motion || 0, dt);
+      }
       const marker = ensureMateMarker(mate);
       const markOn = mp.goAt && performance.now() - mp.goAt < MATE_MARKER_MS;
       mateUp.set(0, 1, 0).applyQuaternion(mateQuat).normalize();
@@ -2535,7 +2595,8 @@ function tickFrame() {
   // sztywna kamera za samolotem — tylko kurs, bez przechyłu/pochylenia
   const camFrame = frameAt(plane.lat, plane.lon, plane.height, plane.heading, 0, 0);
   camFrame.decompose(camFramePos, camFrameQuat, camFrameScale);
-  const radius = Math.hypot(camOffset[1], camOffset[2]) * orbit.zoom;
+  const cameraProfile = selectedPlane === "parachutist" && plane.state === "grounded" ? [0, 2.4, 5.5] : camOffset;
+  const radius = Math.hypot(cameraProfile[1], cameraProfile[2]) * orbit.zoom;
   offset.set(Math.sin(orbit.yaw) * Math.cos(orbit.pitch) * radius, Math.sin(orbit.pitch) * radius, Math.cos(orbit.yaw) * Math.cos(orbit.pitch) * radius).applyQuaternion(camFrameQuat).add(planePos);
   if (!camInit) camPos.copy(offset);
   else camPos.lerp(offset, 1 - Math.exp(-12 * dt));
@@ -2549,7 +2610,7 @@ function tickFrame() {
     camera.position.y += (Math.random() - 0.5) * s;
     camera.position.z += (Math.random() - 0.5) * s;
   }
-  camTarget.set(0, 0.5, -camOffset[2] * 0.4).applyQuaternion(camFrameQuat).add(planePos);
+  camTarget.set(0, selectedPlane === "parachutist" && plane.state === "grounded" ? 1.1 : 0.5, -cameraProfile[2] * 0.4).applyQuaternion(camFrameQuat).add(planePos);
   camera.up.set(0, 1, 0).applyQuaternion(camFrameQuat); // lokalny pion, nie globalny Y
   camera.lookAt(camTarget);
 
@@ -2567,13 +2628,14 @@ function tickFrame() {
   sun.target.updateMatrixWorld();
 
   // poszerzenie FOV przy nitrie — efekt prędkości
-  const targetFov = plane.speed > plane.cruise * 1.2 ? 78 : 70;
+  const targetFov = selectedPlane === "parachutist" && plane.state === "grounded" ? 64 : plane.speed > plane.cruise * 1.2 ? 78 : 70;
   if (Math.abs(camera.fov - targetFov) > 0.05) {
     camera.fov += (targetFov - camera.fov) * Math.min(1, 3 * dt);
     camera.updateProjectionMatrix();
   }
 
-  if ((!menuOpen || awaitingSnap) && frameCount % 8 === 0) {
+  const surfaceProbeEvery = selectedPlane === "parachutist" && !pendingSnap ? 2 : 8;
+  if ((!menuOpen || awaitingSnap) && frameCount % surfaceProbeEvery === 0) {
     const refH = pendingSnap || awaitingSnap ? Math.max(plane.height, spawnHoldAlt()) : plane.height;
     const gh = probeGround(plane.lat, plane.lon, refH);
     if (gh !== null) {
@@ -2597,6 +2659,9 @@ function tickFrame() {
             else finishSnapStart();
           }
         }
+      } else if (selectedPlane === "parachutist") {
+        if (plane.state === "grounded") plane.settleOnSurface(gh);
+        else if (plane.state === "airborne" && plane.verticalSpeed <= 0 && plane.height <= gh + 0.65) plane.land(gh);
       }
     }
   }
@@ -2616,7 +2681,7 @@ function tickFrame() {
   }
   const agl = plane.height - groundAlt;
   // bez kolizji podczas dosadzania — pomiar gruntu jeszcze się doprecyzowuje
-  if (flying && !pendingSnap && (agl < 4 || (frameCount % 4 === 0 && wingHit()))) {
+  if (selectedPlane !== "parachutist" && flying && !pendingSnap && (agl < 4 || (frameCount % 4 === 0 && wingHit()))) {
     crash();
   }
 
@@ -2711,6 +2776,8 @@ function tickFrame() {
     speed: plane.speed,
     height: plane.height,
     groundAlt,
+    agl,
+    pendingSnap,
     lat: plane.latDeg,
     lon: plane.lonDeg,
     mode,
@@ -2729,6 +2796,7 @@ function tickFrame() {
     menuOpen,
     poses: mp.poses.size,
     mates: mateDbg,
+    movementState: plane.state || "airborne",
   };
   window.__cam = camera;
   window.__planeMesh = planeMesh;
@@ -2753,10 +2821,20 @@ window.__forceTestMate = () => {
 
 function updateHud(agl) {
   // skala prędkościomierza pod najszybszy pojazd (nitro), zaokrąglona w górę
-  const maxKmh = Math.ceil((PLANES[selectedPlane].boost * 3.6) / 200) * 200;
+  const maxKmh = selectedPlane === "parachutist" ? 60 : Math.ceil((PLANES[selectedPlane].boost * 3.6) / 200) * 200;
   if (el.gSpeed) drawAirspeed(el.gSpeed, plane.kmh, maxKmh);
   if (el.gAlt) drawAltimeter(el.gAlt, Math.max(0, agl));
   if (el.gHdg) drawCompass(el.gHdg, plane.headingDeg);
+  if (selectedPlane === "parachutist" && !menuOpen) {
+    movementStatus.hidden = false;
+    movementStatus.textContent = plane.state === "grounded"
+      ? "ON FOOT · W/S walk · A/D turn · Shift run · Space relaunch"
+      : plane.state === "launching"
+        ? "RELAUNCHING · steer with A/D"
+        : "CANOPY · steer with A/D · W faster descent · S flare";
+  } else {
+    movementStatus.hidden = true;
+  }
 
   if (timerActive || mode !== "free") {
     const tsec = Math.max(0, Math.ceil(timeLeft));

@@ -1,12 +1,11 @@
 export const QUALITY = Object.freeze({
   performance: { label: 'Performance', pixels: 1920 * 1080, dpr: 1, error: 12, bytes: 320e6, shadows: false },
-  balanced: { label: 'Balanced', pixels: 2560 * 1440, dpr: 1.5, error: 6, bytes: 650e6, shadows: true },
-  ultra: { label: 'Ultra 4K', pixels: 3840 * 2160, dpr: 4, error: 2, bytes: 1200e6, shadows: true },
+  ultra: { label: 'Ultra 4K — very demanding, may lag', pixels: 3840 * 2160, dpr: 4, error: 2, bytes: 1200e6, shadows: true },
 });
 
 // Ultra supersamples smaller screens, preserving aspect ratio and GPU limits.
 export function renderRatio(key, width, height, deviceRatio = 1, maxSize = 8192) {
-  const q = QUALITY[key] || QUALITY.balanced;
+  const q = QUALITY[key] || QUALITY.performance;
   const budget = Math.sqrt(q.pixels / Math.max(1, width * height));
   const desired = key === 'ultra' ? budget : Math.min(deviceRatio, q.dpr, budget);
   return Math.max(0.1, Math.min(desired, maxSize / width, maxSize / height));

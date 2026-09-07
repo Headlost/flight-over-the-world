@@ -1,6 +1,6 @@
 const TYPES = new Set(['hello','welcome','roster','scope','mode','city','plane','ready','talk','snapped','go','rematch','start','pose','guess','done','roundEnd']);
 const GUEST_TYPES = new Set(['hello','plane','ready','talk','snapped','rematch','pose','guess','done']);
-const PLANES = new Set(['pa28','q400','citation','jet','rocket']);
+const PLANES = new Set(['pa28','q400','citation','jet','rocket','parachutist']);
 const finite = (n, low, high) => typeof n === 'number' && Number.isFinite(n) && n >= low && n <= high;
 const location = d => finite(d.lat,-90,90) && finite(d.lon,-180,180);
 
@@ -29,6 +29,8 @@ export function validMessage(data, fromGuest = false) {
     if (data.t !== 'pose' && !finite(data.gh,-12000,1e7)) return false;
   }
   if (data.t === 'pose' && (!finite(data.pitch,-Math.PI,Math.PI) || !finite(data.roll,-Math.PI,Math.PI) || !finite(data.seq,0,Number.MAX_SAFE_INTEGER) || !finite(data.at,0,Number.MAX_SAFE_INTEGER))) return false;
+  if (data.state != null && !['airborne','grounded','launching'].includes(data.state)) return false;
+  if (data.motion != null && !finite(data.motion,0,1000)) return false;
   for (const key of ['roster','players']) if (data[key] != null && (!Array.isArray(data[key]) || data[key].length > 16 || !data[key].every(p => p && typeof p.id === 'string' && typeof p.name === 'string' && p.name.length <= 60 && PLANES.has(p.plane) && (p.score == null || finite(p.score,0,1e9))))) return false;
   if (data.seats != null && (typeof data.seats !== 'object' || Array.isArray(data.seats) || Object.keys(data.seats).length > 16 || !Object.values(data.seats).every(n => Number.isInteger(n) && n >= 0 && n < 16))) return false;
   return true;

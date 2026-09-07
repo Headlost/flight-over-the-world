@@ -18,6 +18,8 @@ test('online launcher has no credential form; quality persists', async ({page}) 
   await expect(page.locator('dialog[open]')).toHaveCount(0);
   await expect(page.locator('input[type=password]')).toHaveCount(0);
   await page.locator('#settings-toggle').click();
+  await expect(page.locator('#quality option')).toHaveCount(2);
+  await expect(page.locator('#quality option[value=balanced]')).toHaveCount(0);
   await page.locator('#quality').selectOption('ultra');
   await page.locator('#adaptive').uncheck();
   await page.getByRole('button',{name:'Done',exact:true}).click();
@@ -31,6 +33,18 @@ test('online launcher has no credential form; quality persists', async ({page}) 
   await expect(page.locator('#quality')).toHaveValue('ultra');
   await expect(page.locator('#adaptive')).not.toBeChecked();
   expect(errors).toEqual([]);
+});
+
+test('parachutist is selectable and its animated model is bundled', async ({page}) => {
+  const model = await page.request.get('/models/parachutist.glb');
+  expect(model.ok()).toBe(true);
+  expect((await model.body()).subarray(0, 4).toString()).toBe('glTF');
+  await page.goto('/');
+  await page.getByRole('button',{name:'Single player',exact:true}).click();
+  await page.locator('#car-prev').click();
+  await expect(page.locator('#car-name')).toHaveText('Parachutist');
+  await expect(page.locator('#car-desc')).toContainText('Land on roofs or streets');
+  await expect(page.locator('body')).toHaveClass(/parachutist-selected/);
 });
 
 test('invalid coordinates show an actionable error', async ({page}) => {

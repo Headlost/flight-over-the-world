@@ -9,7 +9,7 @@ function readSettings() {
 const saved = readSettings();
 // Map access is supplied by the deployment, never by players.
 export const settings = {
-  quality: QUALITY[saved.quality] ? saved.quality : (matchMedia('(pointer: coarse)').matches ? 'performance' : 'balanced'),
+  quality: QUALITY[saved.quality] ? saved.quality : 'performance',
   adaptive: saved.adaptive !== false,
   ion: import.meta.env.VITE_CESIUM_ION_KEY || '',
 };
@@ -24,7 +24,7 @@ export function setupSettings(onQualityChange, onOpen) {
     <p>Ready to fly online. Choose the picture quality that suits your device.</p>
     <label>Rendering quality<select id="quality">${Object.entries(QUALITY).map(([k,q]) => `<option value="${k}">${q.label}</option>`).join('')}</select></label>
     <label class="check"><input id="adaptive" type="checkbox"> Adapt resolution to keep flight smooth</label>
-    <p class="settings-note">Ultra targets 3840 × 2160 at 16:9. Adaptive mode may lower resolution. Terrain detail depends on coverage, connection and GPU memory.</p>
+    <p class="settings-note" id="quality-warning">Performance is the recommended default. Ultra 4K targets 3840 × 2160 and is very demanding, so it may lag even on fast devices. Adaptive mode may lower resolution.</p>
     <button value="close">Done</button>
   </form>`;
   document.body.append(dialog);

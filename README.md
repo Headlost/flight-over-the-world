@@ -2,7 +2,7 @@
 
 **Graj:** https://headlost.github.io/flight-over-the-world/
 
-Otwórz stronę, wybierz samolot i wystartuj. Gracz nie zakłada konta, nie instaluje programu i nie wpisuje żadnych tokenów ani kluczy.
+Otwórz stronę, wybierz samolot lub spadochroniarza i wystartuj. Gracz nie zakłada konta, nie instaluje programu i nie wpisuje żadnych tokenów ani kluczy.
 
 ## Miejsce startu
 
@@ -22,12 +22,17 @@ W Free flight wybrane miejsce jest startem. W Fly home jest celem, a start znajd
 | C | Reset kamery |
 | Esc | Pauza |
 | T (przytrzymaj) | Rozmowa multiplayer |
+| Spacja | Ponowny start spadochroniarza po lądowaniu |
 
 Na telefonie użyj drążka dotykowego. W multiplayer wyślij znajomemu link do pokoju.
 
+### Spadochroniarz
+
+W karuzeli pojazdów wybierz **Parachutist**. Czasza leci z prędkością około 24–55 km/h: `A/D` steruje zakrętem, `W` przyspiesza opadanie, a `S` wykonuje flarę i zwalnia. Przyziemienie na rozpoznanej powierzchni ulicy lub płaskiego dachu jest bezpieczne i automatycznie przełącza postać na chodzenie. Na ziemi `W/S` porusza postać, `A/D` obraca, a `Shift` uruchamia bieg. Zejście z wysokiej krawędzi ponownie otwiera czaszę. `Spacja` lub przycisk **Relaunch** rozpoczyna kontrolowane wznoszenie i pozwala kontynuować lot.
+
 ## Grafika
 
-W Settings wybierz Performance, Balanced lub **Ultra 4K**. Ultra celuje w bufor 3840 × 2160 przy proporcjach 16:9. Adapt resolution zmniejsza rozdzielczość przy spadkach płynności i przywraca ją, gdy urządzenie nadąża. Aby utrzymać docelowe 4K, wyłącz adaptację.
+**Performance** jest domyślnym i zalecanym trybem. Opcjonalny **Ultra 4K** celuje w bufor 3840 × 2160 przy proporcjach 16:9, ale jest bardzo wymagający i może powodować spadki płynności. Adapt resolution zmniejsza rozdzielczość przy spadkach FPS i przywraca ją, gdy urządzenie nadąża. Aby utrzymać docelowe 4K, wyłącz adaptację.
 
 Szczegóły map doczytują się przez Internet. Rozdzielczość obrazu nie zwiększa dokładności źródłowej fotogrametrii; jakość i płynność zależą od zasięgu danych, połączenia oraz GPU. Fizyka pozostaje uproszczonym modelem gry.
 

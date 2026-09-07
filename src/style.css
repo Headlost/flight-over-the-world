@@ -37,6 +37,8 @@ input[style*="display: none"] + .pick-location, input.locked + .pick-location { 
 #map-credits img { max-height: 22px; max-width: 100px; }
 #flight-status { position: fixed; top: 58px; right: 16px; z-index: 4; max-width: min(430px, 80vw); padding: 6px 10px; background: #09131cb3; border-radius: 6px; color: #eaf2ff; font: 11px/1.5 system-ui; pointer-events: none; }
 #flight-status:empty { display: none; }
+#movement-status { position: fixed; left: 50%; bottom: 126px; z-index: 4; transform: translateX(-50%); max-width: min(680px, calc(100vw - 28px)); padding: 8px 13px; border: 1px solid #7ec8e380; border-radius: 999px; background: #09131cd9; color: #f4f8ff; font: 700 11px/1.4 system-ui; letter-spacing: .045em; text-align: center; pointer-events: none; }
+#movement-status[hidden] { display: none; }
 button:focus-visible, input:focus-visible, select:focus-visible, summary:focus-visible { outline: 3px solid #80c6ff; outline-offset: 3px; }
 @media (max-width: 600px) { .flight-dialog { padding: 18px; } #settings-toggle { top: 8px; right: 8px; } .pin-row { flex-wrap: wrap; } .pin-row input { flex: 1 1 100%; } }
 
@@ -1169,6 +1171,8 @@ kbd {
 }
 
 #touch-talk { display: none; }
+#touch-action { display: none; }
+body.parachutist-selected #touch-action { display: block; }
 #touch.talk #touch-talk { display: block; }
 
 @media (hover: none), (pointer: coarse), (max-width: 720px) {

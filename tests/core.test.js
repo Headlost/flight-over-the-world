@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { PlaneController } from '../src/game/plane.js';
+import { ParachutistController } from '../src/game/paraglider.js';
 import { parseCoordinates, geocodeCity } from '../src/game/location.js';
 import { validMessage, escapeHtml } from '../src/game/protocol.js';
 import { renderRatio, AdaptiveQuality } from '../src/game/quality.js';
@@ -31,6 +32,8 @@ test('adaptive rendering recovers and stays bounded', () => {
 const pose = {t:'pose',lat:52,lon:16,h:400,heading:0,pitch:0,roll:0,seq:2,at:1200,plane:'pa28'};
 test('multiplayer rejects forged host commands, malformed poses and unsafe object keys', () => {
   assert.equal(validMessage(pose,true),true);
+  assert.equal(validMessage({...pose,plane:'parachutist',state:'grounded',motion:2},true),true);
+  assert.equal(validMessage({...pose,state:'teleporting'},true),false);
   for (const field of ['lat','lon','h','heading','pitch','roll','seq','at']) assert.equal(validMessage({...pose,[field]:NaN},true),false);
   assert.equal(validMessage({...pose,lat:91},true),false);
   assert.equal(validMessage({...pose,plane:'constructor'},true),false);
@@ -71,6 +74,35 @@ test('faster aircraft have wider turns at the same bank', () => {
   const fast = new PlaneController(0,0,1000,90,{cruise:150,boost:300,brake:80});
   for(let i=0;i<600;i++) { slow.update(1/60,{roll:0.5,pitch:0,throttle:0}); fast.update(1/60,{roll:0.5,pitch:0,throttle:0}); }
   assert.ok(slow.heading - Math.PI/2 > fast.heading - Math.PI/2);
+});
+
+test('parachutist lands safely, walks, runs and relaunches', () => {
+  const pilot = new ParachutistController(52, 16, 120, 0);
+  for (let i = 0; i < 60; i++) pilot.update(1 / 60, {roll:0.5,pitch:-1,throttle:0});
+  assert.equal(pilot.state, 'airborne');
+  assert.ok(pilot.height < 120);
+  assert.ok(pilot.heading > 0);
+  pilot.land(100);
+  assert.equal(pilot.state, 'grounded');
+  const lat = pilot.lat;
+  for (let i = 0; i < 120; i++) pilot.update(1 / 60, {roll:0,pitch:-1,throttle:1});
+  assert.ok(pilot.lat > lat);
+  assert.ok(pilot.kmh > 12);
+  pilot.settleOnSurface(100);
+  assert.equal(pilot.height, 100);
+  assert.equal(pilot.takeOff(100), true);
+  for (let i = 0; i < 1200; i++) pilot.update(1 / 60, {roll:0,pitch:0,throttle:0});
+  assert.equal(pilot.state, 'airborne');
+  assert.ok(pilot.height > 170);
+});
+
+test('parachutist leaves a roof as flight instead of crashing', () => {
+  const pilot = new ParachutistController(52, 16, 120, 0);
+  pilot.land(120);
+  pilot.update(1 / 60, {roll:0,pitch:-1,throttle:0});
+  pilot.settleOnSurface(105);
+  assert.equal(pilot.state, 'airborne');
+  assert.equal(pilot.crashed, false);
 });
 
 test('shared model resources are freed exactly once and detached', () => {

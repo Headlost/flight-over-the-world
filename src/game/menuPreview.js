@@ -78,7 +78,7 @@ export function createCarousel(canvas, items, opts = {}) {
 
   for (const item of items) {
     loader.load(item.file, (gltf) => {
-      const model = gltf.scene;
+      const model = item.build ? item.build(gltf) : gltf.scene;
       if (item.prepare) item.prepare(model); // np. poza czarownicy + miotła
       const box = new Box3().setFromObject(model);
       const size = box.getSize(new Vector3());
@@ -109,6 +109,8 @@ export function createCarousel(canvas, items, opts = {}) {
     current.group.position.x = current.slideX;
     current.group.rotation.y = t * 0.45;
     current.group.rotation.z = Math.sin(t * 0.6) * 0.05;
+    const item = items.find((entry) => entry.key === currentKey);
+    if (item?.update) item.update(current.group.children[0] || current.group, 1 / 60);
     renderer.render(scene, camera);
   }
   tick();
