@@ -1,3 +1,9 @@
+import { settings, setupSettings } from './game/settings.js';
+import { disposeModel } from './game/dispose.js';
+import { QUALITY, renderRatio, AdaptiveQuality } from './game/quality.js';
+import { geocodeCity, setupLocationPicker } from './game/location.js';
+import { validMessage, escapeHtml } from './game/protocol.js';
+import { renderAttributions } from './game/attribution.js';
 import {
   WGS84_ELLIPSOID,
   CAMERA_FRAME,
@@ -9,7 +15,6 @@ import {
   TileCompressionPlugin,
   UnloadTilesPlugin,
   GLTFExtensionsPlugin,
-  GoogleCloudAuthPlugin,
   CesiumIonAuthPlugin,
 } from "3d-tiles-renderer/plugins";
 import {
@@ -130,23 +135,20 @@ const GUESS_SCOPES = {
   },
 };
 
-const API_KEY = import.meta.env.VITE_GOOGLE_MAPS_KEY;
-const ION_KEY = import.meta.env.VITE_CESIUM_ION_KEY;
+const ION_KEY = settings.ion;
 const TERRAIN_ALT = 120; // przybliżona wysokość elipsoidalna nizin
 
-// Google wyłączyło Photorealistic 3D Tiles dla kont billingowych z EEA (403).
-// Obejście: darmowe konto Cesium ion — serwuje te same kafelki Google
-// (asset 2275207), plugin sam pobiera brokerowany token i odnawia go co 3 h.
+// Access depends on the provider account, enabled asset, region and quotas.
 const ION_GOOGLE_TILES_ASSET = "2275207";
 
 const PLANES = {
   pa28: {
     file: asset("models/pa28.glb"),
     wingspan: 11,
-    cruise: 48, boost: 130, brake: 30,
+    cruise: 48, boost: 65, brake: 30,
     cam: [0, 5.5, 15],
     name: "Piper PA-28",
-    desc: "Light propeller – cruise 170, max 470 km/h",
+    desc: "Light propeller – cruise 173, max 234 km/h",
     sound: "plane",
   },
   q400: {
@@ -708,7 +710,7 @@ function playerRow(p, isSelf) {
     badge = "READY";
     cls = " ready";
   }
-  return `<div class="player-row${cls}"><div class="p-meta"><span>${p.name}${isSelf ? " (You)" : ""}</span><span class="p-plane">${plane}${pts}</span></div><span class="p-ready">${badge}</span></div>`;
+  return `<div class="player-row${cls}"><div class="p-meta"><span>${escapeHtml(p.name)}${isSelf ? " (You)" : ""}</span><span class="p-plane">${escapeHtml(plane)}${escapeHtml(pts)}</span></div><span class="p-ready">${badge}</span></div>`;
 }
 
 function applyLobbySetup() {
@@ -803,13 +805,14 @@ function updateVoiceUi() {
 
 async function handleVoiceCall(call) {
   if (!call) return;
-  await ensureMic();
+  if (!mp.active || !mp.players.has(call.peer)) { call.close(); return; }
   answerCall(call);
   refreshVoice();
 }
 
 function handleNetData(data, fromId) {
-  if (!data || !data.t) return;
+  if (!validMessage(data, mp.host && !!fromId)) return;
+  if (mp.host && fromId && data.t !== "hello" && !mp.players.has(fromId)) return;
   if (mp.host && fromId) {
     data = { ...data, from: fromId };
     if (data.t !== "hello") mp.net.sendExcept(fromId, data);
@@ -910,7 +913,7 @@ function handleNetData(data, fromId) {
     updateRematchWait();
     if (mp.host) tryLaunchRematch();
   } else if (data.t === "start") {
-    if (data.seats && mp.myId && !data.seats[mp.myId]) {
+    if (data.seats && mp.myId && !Object.hasOwn(data.seats, mp.myId)) {
       mp.roundActive = true;
       mp.waiting = true;
       mp.inRound = false;
@@ -1490,8 +1493,9 @@ el.lobbyCity.addEventListener("input", () => {
 });
 
 function init() {
-  if (!ION_KEY && !API_KEY) {
-    setLoader("Missing map key – add VITE_CESIUM_ION_KEY to .env", 0);
+  if (!ION_KEY) {
+    hideLoader();
+    showFatal('Terrain is temporarily unavailable. Please try again later.');
     return;
   }
   setLoader("Start…", 0.4);
@@ -1511,14 +1515,14 @@ function init() {
   renderer.setSize(innerWidth, innerHeight);
   renderer.toneMapping = 4;
   renderer.toneMappingExposure = 1.1;
-  renderer.shadowMap.enabled = !isMobile;
+  renderer.shadowMap.enabled = QUALITY[settings.quality].shadows;
   renderer.shadowMap.type = 2; // PCFSoft
   renderer.domElement.id = "game-canvas";
   document.body.appendChild(renderer.domElement);
 
   scene.add(new HemisphereLight(0xbfd8ee, 0x5a7048, 1.15));
   sun = new DirectionalLight(0xfff2dd, 2.0);
-  sun.castShadow = !isMobile;
+  sun.castShadow = QUALITY[settings.quality].shadows;
   sun.shadow.mapSize.set(2048, 2048);
   sun.shadow.camera.near = 1;
   sun.shadow.camera.far = 2500;
@@ -1531,7 +1535,7 @@ function init() {
   scene.add(sun);
   scene.add(sun.target);
 
-  camera = new PerspectiveCamera(70, innerWidth / innerHeight, 0.5, 1e8);
+  camera = new PerspectiveCamera(70, innerWidth / innerHeight, 1, 2e6);
 
   tiles = new TilesRenderer();
   if (ION_KEY) {
@@ -1540,10 +1544,9 @@ function init() {
         apiToken: ION_KEY,
         assetId: ION_GOOGLE_TILES_ASSET,
         autoRefreshToken: true,
+        useRecommendedSettings: false,
       })
     );
-  } else {
-    tiles.registerPlugin(new GoogleCloudAuthPlugin({ apiToken: API_KEY }));
   }
   tiles.registerPlugin(new TileCompressionPlugin());
   tiles.registerPlugin(new UpdateOnChangePlugin());
@@ -1557,26 +1560,24 @@ function init() {
   scene.add(tiles.group);
   tiles.setResolutionFromRenderer(camera, renderer);
   tiles.setCamera(camera);
-  tiles.errorTarget = 10;
-  tiles.lruCache.maxSize = isMobile ? 1600 : 3000;
-  tiles.lruCache.maxBytesSize = isMobile ? 2.8e8 : 1.5e9;
+  applyQuality();
+  tiles.addEventListener('load-model', ({ scene: model }) => {
+    const anisotropy = Math.min(8, renderer.capabilities.getMaxAnisotropy());
+    model.traverse(object => {
+      if (!object.isMesh) return;
+      object.castShadow = true; object.receiveShadow = true;
+      for (const material of Array.isArray(object.material) ? object.material : [object.material]) {
+        if (material?.map) { material.map.anisotropy = anisotropy; material.map.needsUpdate = true; }
+      }
+    });
+  });
   if (isMobile) tiles.loadSiblings = false;
 
-  // czytelny komunikat zamiast wiecznego ładowania
-  tiles.addEventListener("load-error", () => {
-    if (!loaderDismissed) {
-      loadError = ION_KEY
-        ? "Cesium ion is not responding – check VITE_CESIUM_ION_KEY"
-        : "Google blocked 3D tiles for EEA accounts – add VITE_CESIUM_ION_KEY to .env";
-    }
+  tiles.addEventListener('load-error', () => {
+    loadError = 'Terrain could not load. Check your connection and try another departure or try again later.';
+    flightStatus.textContent = loadError;
   });
-  setTimeout(() => {
-    if (!loaderDismissed && tiles.group.children.length === 0) {
-      loadError = ION_KEY
-        ? "The map is not loading… check VITE_CESIUM_ION_KEY"
-        : "Google disabled 3D tiles for EEA accounts – you need a free Cesium ion token (VITE_CESIUM_ION_KEY in .env)";
-    }
-  }, 20000);
+  tiles.addEventListener('load-model', () => { loadError = null; });
 
   // niebo — proceduralna kopuła (gradient + słońce + chmury FBM),
   // horyzont = dokładnie kolor mgły, więc nie ma przerwy ani poświaty
@@ -1602,10 +1603,11 @@ function init() {
   hideLoader();
 
   window.addEventListener("resize", onResize);
+  bindOrbit(renderer.domElement);
   renderer.domElement.addEventListener("webglcontextlost", (e) => {
     e.preventDefault();
     window.__ctxLost = true;
-    showFatal("Graphics memory ran out on this phone (WebGL). Close other tabs and tap Start again, or use a computer.");
+    showFatal("The graphics context was lost. Select Performance in Settings, then reload the page.");
   });
   window.__game = { get planeMesh() { return planeMesh; }, get plane() { return plane; }, get camera() { return camera; } };
   window.__scene = scene;
@@ -1613,7 +1615,7 @@ function init() {
   showCrashHints();
   } catch (err) {
     console.error(err);
-    const msg = "This phone could not start the 3D engine. Try Safari or Chrome, or a computer.";
+    const msg = "The 3D engine could not start. Check WebGL support and hardware acceleration.";
     setLoader(msg, 0);
     showFatal(err?.message ? `${msg} (${err.message})` : msg);
   }
@@ -1622,13 +1624,15 @@ function init() {
 function loadPlane(key) {
   const spec = PLANES[key];
   camOffset = spec.cam;
-  if (planeMesh) scene.remove(planeMesh);
+  disposeModel(planeMesh);
   planeMesh = createPlaneMesh(); // fallback na czas ładowania
   planeMesh.userData.key = key;
   applyRotorState(planeMesh, true);
   scene.add(planeMesh);
+  const placeholder = planeMesh;
 
   new GLTFLoader().load(spec.file, (gltf) => {
+    if (planeMesh !== placeholder) { disposeModel(gltf.scene); return; }
     const model = gltf.scene;
     if (spec.prepare) spec.prepare(model); // np. poza czarownicy + miotła
     const box = new Box3().setFromObject(model);
@@ -1648,7 +1652,8 @@ function loadPlane(key) {
     wrapper.userData.prop = null;
     wrapper.userData.key = key;
     applyRotorState(wrapper, true);
-    scene.remove(planeMesh);
+    wrapper.visible = planeMesh.visible;
+    disposeModel(planeMesh);
     planeMesh = wrapper;
     scene.add(planeMesh);
   });
@@ -1656,8 +1661,8 @@ function loadPlane(key) {
 
 function disposeMate(id) {
   const mate = mp.mates.get(id);
-  if (mate?.mesh && scene) scene.remove(mate.mesh);
-  if (mate?.marker && scene) scene.remove(mate.marker);
+  disposeModel(mate?.mesh);
+  disposeModel(mate?.marker);
   mp.mates.delete(id);
 }
 
@@ -1705,7 +1710,7 @@ function loadMate(id, key) {
   mp.mates.set(id, { mesh: placeholder, key });
   new GLTFLoader().load(spec.file, (gltf) => {
     const cur = mp.mates.get(id);
-    if (!cur || cur.key !== key) return;
+    if (!cur || cur.mesh !== placeholder) { disposeModel(gltf.scene); return; }
     const model = gltf.scene;
     if (spec.prepare) spec.prepare(model);
     const box = new Box3().setFromObject(model);
@@ -1725,7 +1730,7 @@ function loadMate(id, key) {
     wrapper.userData.key = key;
     wrapper.visible = cur.mesh.visible;
     applyRotorState(wrapper, true);
-    scene.remove(cur.mesh);
+    disposeModel(cur.mesh);
     scene.add(wrapper);
     mp.mates.set(id, { mesh: wrapper, key, marker: cur.marker });
   });
@@ -1756,7 +1761,9 @@ function resetFlight(latDeg, lonDeg) {
 
 function applyPixelRatio() {
   if (!renderer) return;
-  renderer.setPixelRatio(Math.min(devicePixelRatio || 1, 2));
+  const gl = renderer.getContext();
+  const size = Math.min(renderer.capabilities.maxTextureSize, ...gl.getParameter(gl.MAX_VIEWPORT_DIMS));
+  renderer.setPixelRatio(renderRatio(settings.quality, innerWidth, innerHeight, devicePixelRatio || 1, size) * (settings.adaptive ? adaptiveQuality.scale : 1));
 }
 
 function onResize() {
@@ -1829,17 +1836,6 @@ function crash() {
   setTimeout(() => showBanner("YOU CRASHED"), 900);
 }
 
-async function geocodeCity(name) {
-  const url =
-    "https://nominatim.openstreetmap.org/search?format=json&limit=1&q=" +
-    encodeURIComponent(name);
-  const res = await fetch(url, { headers: { "Accept-Language": "en" } });
-  if (!res.ok) throw new Error("http " + res.status);
-  const data = await res.json();
-  if (!data.length) return null;
-  return { lat: parseFloat(data[0].lat), lon: parseFloat(data[0].lon) };
-}
-
 function placeBeaconAt(latDeg, lonDeg) {
   const gh = probeGround(latDeg * (Math.PI / 180), lonDeg * (Math.PI / 180), TERRAIN_ALT + 200);
   const base = gh !== null ? gh : TERRAIN_ALT;
@@ -1850,6 +1846,7 @@ function placeBeaconAt(latDeg, lonDeg) {
 
 // --- start gry ---
 async function startGame() {
+  if (!ION_KEY) { return menuFail('Terrain is temporarily unavailable. Please try again later.'); }
   if (!gameReady || !tiles || !plane) {
     return menuFail("Still loading – tap Start again in a moment");
   }
@@ -1882,7 +1879,7 @@ async function startGame() {
     }
   } catch (err) {
     console.error(err);
-    menuFail("Could not start – try again, or use a stronger connection");
+    menuFail(err.message || "Could not start. Try again.");
   }
 }
 
@@ -1898,6 +1895,8 @@ function sleepPreviews() {
 }
 
 function beginFlight(lat, lon) {
+  loadError = null;
+  tiles.resetFailedTiles();
   markStarting();
   sleepPreviews();
   el.menuError.textContent = "Loading terrain…";
@@ -1969,6 +1968,7 @@ el.lobbyCopy.addEventListener("click", async () => {
   }
 });
 el.lobbyStart.addEventListener("click", () => {
+  if (!gameReady) { setLobbyStatus('Terrain is not ready. Please try again in a moment.', true); return; }
   unlockAudio();
   if (mp.waiting || (mp.roundActive && !mp.inRound)) {
     setLobbyStatus("Round in progress – you will join the next one");
@@ -1994,6 +1994,7 @@ if (joinId) {
 function setPaused(v) {
   paused = v;
   keys.clear();
+  resetStick(); touch.boost = false; touch.brake = false;
   el.pause.classList.toggle("show", v);
 }
 
@@ -2186,23 +2187,30 @@ window.addEventListener("keydown", (e) => {
     if (!menuOpen && !guessOpen) setPaused(!paused);
     return;
   }
-  if (e.target && e.target.tagName === "INPUT") return;
+  if (e.target?.closest("input, textarea, select, [contenteditable], dialog")) return;
   const k = e.key.toLowerCase();
   if (k === "t" && mp.active) {
     if (!e.repeat) startTalk();
     return;
   }
   if (menuOpen || paused || guessOpen) return;
+  if (["arrowup","arrowdown","arrowleft","arrowright"," ","control"].includes(k)) e.preventDefault();
+  if (k === "c" && !e.repeat) { orbit.yaw = 0; orbit.pitch = 0.25; orbit.zoom = 1; }
   keys.add(k);
   if (k === "r" && (crashed || finished)) restartMode();
 });
 window.addEventListener("keyup", (e) => {
-  if (e.target && e.target.tagName === "INPUT") return;
   const k = e.key.toLowerCase();
   if (k === "t") stopTalk();
   keys.delete(k);
 });
-window.addEventListener("blur", () => stopTalk());
+window.addEventListener('blur', clearFlightInput);
+document.addEventListener('visibilitychange', () => { if (document.hidden) clearFlightInput(); });
+function clearFlightInput() {
+  keys.clear(); ctrl.roll = 0; ctrl.pitch = 0; ctrl.throttle = 0;
+  resetStick(); touch.boost = false; touch.brake = false; stopTalk();
+  if (!menuOpen && !guessOpen) setPaused(true);
+}
 
 const touch = { roll: 0, pitch: 0, boost: false, brake: false, pid: null };
 
@@ -2328,6 +2336,34 @@ const skyFramePos = new Vector3();
 const skyFrameScale = new Vector3();
 let camInit = false;
 
+const adaptiveQuality = new AdaptiveQuality();
+const flightStatus = document.createElement('div'); flightStatus.id = 'flight-status'; document.body.append(flightStatus);
+const credits = document.createElement('div'); credits.id = 'map-credits'; document.body.append(credits);
+const settingsUI = setupSettings(() => { adaptiveQuality.reset(); applyQuality(); }, () => { if (!menuOpen) setPaused(true); });
+setupLocationPicker(() => { if (!menuOpen) setPaused(true); });
+const orbit = { yaw:0, pitch:0.25, zoom:1, dragging:false };
+function bindOrbit(canvas) {
+  canvas.addEventListener('contextmenu', e => e.preventDefault());
+  canvas.addEventListener('pointerdown', e => { if (e.button === 2) { orbit.dragging = true; canvas.setPointerCapture(e.pointerId); } });
+  canvas.addEventListener('pointermove', e => { if (orbit.dragging) { orbit.yaw -= e.movementX * 0.005; orbit.pitch = Math.max(-1.2, Math.min(1.4, orbit.pitch + e.movementY * 0.005)); } });
+  for (const event of ['pointerup','pointercancel','lostpointercapture']) canvas.addEventListener(event, () => { orbit.dragging = false; });
+  canvas.addEventListener('wheel', e => { if (!menuOpen) { e.preventDefault(); orbit.zoom = Math.max(0.5, Math.min(8, orbit.zoom * Math.exp(e.deltaY * 0.001))); } }, {passive:false});
+}
+function applyQuality() {
+  if (!renderer) return;
+  const q = QUALITY[settings.quality];
+  applyPixelRatio();
+  renderer.shadowMap.enabled = q.shadows;
+  if (sun) sun.castShadow = q.shadows;
+  if (tiles) {
+    tiles.errorTarget = q.error;
+    tiles.lruCache.maxSize = 2400;
+    tiles.lruCache.minSize = 1200;
+    tiles.lruCache.maxBytesSize = q.bytes;
+    tiles.lruCache.minBytesSize = q.bytes * 0.65;
+    tiles.setResolutionFromRenderer(camera, renderer);
+  }
+}
 init();
 animate();
 
@@ -2355,9 +2391,10 @@ window.addEventListener("pagehide", () => {
 });
 
 function animate() {
-  requestAnimationFrame(animate);
+  if (window.__ctxLost) return;
   try {
     tickFrame();
+    requestAnimationFrame(animate);
   } catch (err) {
     console.error(err);
     showFatal(err?.message || "The game crashed while drawing a frame");
@@ -2367,7 +2404,10 @@ function animate() {
 function tickFrame() {
   if (!tiles || !plane) return;
 
-  const dt = Math.min(clock.getDelta(), 0.05);
+  const rawDt = clock.getDelta();
+  if (document.hidden) return;
+  const dt = Math.min(rawDt, 0.05);
+  if (!menuOpen && !paused && settings.adaptive && adaptiveQuality.sample(rawDt)) applyPixelRatio();
   frameCount += 1;
   scene.updateMatrixWorld();
 
@@ -2495,8 +2535,10 @@ function tickFrame() {
   // sztywna kamera za samolotem — tylko kurs, bez przechyłu/pochylenia
   const camFrame = frameAt(plane.lat, plane.lon, plane.height, plane.heading, 0, 0);
   camFrame.decompose(camFramePos, camFrameQuat, camFrameScale);
-  offset.set(camOffset[0], camOffset[1], camOffset[2]).applyQuaternion(camFrameQuat).add(planePos);
-  camPos.copy(offset);
+  const radius = Math.hypot(camOffset[1], camOffset[2]) * orbit.zoom;
+  offset.set(Math.sin(orbit.yaw) * Math.cos(orbit.pitch) * radius, Math.sin(orbit.pitch) * radius, Math.cos(orbit.yaw) * Math.cos(orbit.pitch) * radius).applyQuaternion(camFrameQuat).add(planePos);
+  if (!camInit) camPos.copy(offset);
+  else camPos.lerp(offset, 1 - Math.exp(-12 * dt));
   camInit = true;
   camera.position.copy(camPos);
   // trzęsienie kamery po wybuchu
@@ -2507,7 +2549,7 @@ function tickFrame() {
     camera.position.y += (Math.random() - 0.5) * s;
     camera.position.z += (Math.random() - 0.5) * s;
   }
-  camTarget.set(0, 0.5, -camOffset[2] * 1.6).applyQuaternion(camFrameQuat).add(planePos);
+  camTarget.set(0, 0.5, -camOffset[2] * 0.4).applyQuaternion(camFrameQuat).add(planePos);
   camera.up.set(0, 1, 0).applyQuaternion(camFrameQuat); // lokalny pion, nie globalny Y
   camera.lookAt(camTarget);
 
@@ -2523,15 +2565,6 @@ function tickFrame() {
   sun.position.copy(offset).multiplyScalar(700).add(planePos);
   sun.target.position.copy(planePos);
   sun.target.updateMatrixWorld();
-
-  if (!liteMode && !menuOpen && frameCount % 15 === 0) {
-    tiles.group.traverse((o) => {
-      if (o.isMesh && !o.castShadow) {
-        o.castShadow = true;
-        o.receiveShadow = true;
-      }
-    });
-  }
 
   // poszerzenie FOV przy nitrie — efekt prędkości
   const targetFov = plane.speed > plane.cruise * 1.2 ? 78 : 70;
@@ -2567,7 +2600,14 @@ function tickFrame() {
       }
     }
   }
-  if (awaitingSnap && performance.now() - awaitingSnapSince > 20000) {
+  if (awaitingSnap && performance.now() - awaitingSnapSince > 30000 && snapLastGh === null) {
+    awaitingSnap = false; pendingSnap = false;
+    if (mp.active) { mp.launching = false; hideMpWait(); backToLobby(); }
+    else backToMenu();
+    showFatal(loadError || 'No terrain found at this location. Check map access or choose another departure.');
+    return;
+  }
+  if (awaitingSnap && performance.now() - awaitingSnapSince > 20000 && snapLastGh !== null) {
     awaitingSnap = false;
     pendingSnap = false;
     if (snapLastGh !== null) plane.height = snapLastGh + snapAgl();
@@ -2645,6 +2685,15 @@ function tickFrame() {
   }
 
   renderer.render(scene, camera);
+  if (frameCount % 30 === 0) {
+    const canvas = renderer.domElement;
+    flightStatus.hidden = menuOpen;
+    flightStatus.textContent = loadError || QUALITY[settings.quality].label + ' · ' + canvas.width + ' × ' + canvas.height + ' · ' + Math.round(1 / Math.max(rawDt,0.001)) + ' FPS' + (tiles.isLoading ? ' · Streaming terrain…' : '');
+    renderAttributions(credits, tiles.getAttributions([]));
+    if (tiles.visibleTiles.size) {
+      const source = document.createElement('span'); source.textContent = 'Terrain: Google Maps'; credits.prepend(source);
+    }
+  }
 
   const mateDbg = [];
   for (const [id, mate] of mp.mates) {

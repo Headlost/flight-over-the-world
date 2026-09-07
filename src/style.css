@@ -6,6 +6,40 @@
   --muted: #c9b89a;
 }
 
+#settings-toggle { position: fixed; right: 16px; top: 14px; z-index: 70; padding: 9px 16px; font: 600 13px system-ui; background: #17212de8; color: #eef6ff; border: 1px solid #91aac855; border-radius: 9px; cursor: pointer; }
+.flight-dialog { width: min(620px, calc(100vw - 24px)); max-height: calc(100dvh - 32px); overflow: auto; padding: 26px; color: #eaf2ff; background: #101c29; border: 1px solid #638098; border-radius: 18px; box-shadow: 0 24px 90px #000a; font: 14px/1.6 system-ui, sans-serif; }
+.flight-dialog::backdrop { background: #030b16cc; backdrop-filter: blur(8px); }
+.flight-dialog h2 { margin: 0; font-size: 23px; }
+.flight-dialog .dialog-heading { display: flex; align-items: center; justify-content: space-between; gap: 16px; }
+.flight-dialog label { display: block; margin: 15px 0 6px; }
+.flight-dialog input:not([type=checkbox]), .flight-dialog select { width: 100%; min-height: 44px; background: #09121f; color: #eef6ff; border: 1px solid #4d657a; border-radius: 8px; padding: 10px 12px; font: inherit; }
+.flight-dialog .check { display: flex; gap: 10px; align-items: center; }
+.flight-dialog button, .pick-location { padding: 10px 15px; border-radius: 8px; border: 1px solid #8293a6; font: 600 13px system-ui; background: #d6a753; color: #17202c; cursor: pointer; }
+.flight-dialog button:disabled { opacity: .45; cursor: default; }
+.flight-dialog details { margin: 18px 0; border-block: 1px solid #52657a; padding-block: 16px; }
+.flight-dialog summary { cursor: pointer; font-weight: 650; }
+.flight-dialog a { color: #a8d7ff; }
+.settings-note, #pin-status { color: #acbed0; font-size: 12px; }
+.pin-row { display: flex; align-items: center; gap: 12px; justify-content: space-between; }
+.pin-row input { min-width: 0; }
+.pin-row button { flex-shrink: 0; }
+.location-dialog { width: min(880px, calc(100vw - 24px)); }
+#departure-map { height: min(45dvh, 430px); min-height: 180px; background: #152839; border-radius: 10px; margin: 12px 0; }
+.departure-pin { background: #e5ac42; color: #172331; border: 2px solid white; border-radius: 50% 50% 50% 0; transform-origin: center; box-shadow: 0 3px 10px #0008; text-align: center; font: 18px/28px system-ui; }
+.location-dialog .leaflet-control a { color: #172331; }
+.location-dialog .leaflet-control-attribution { color: #253340; font: 10px/1.5 system-ui; }
+.location-dialog .leaflet-control-attribution a { color: #075784; }
+.pick-location { background: #25364a; color: #d8e8fa; margin: 8px 0; }
+input[style*="display: none"] + .pick-location, input.locked + .pick-location { display: none; }
+.start-row { flex-wrap: wrap; }
+#map-credits { position: fixed; bottom: 0; right: 0; z-index: 65; display: flex; flex-wrap: wrap; justify-content: flex-end; align-items: center; gap: 8px; max-width: 100%; padding: 3px 8px; background: #0a1322d9; color: white; font: 10px/1.4 system-ui; }
+#map-credits a { color: white; }
+#map-credits img { max-height: 22px; max-width: 100px; }
+#flight-status { position: fixed; top: 58px; right: 16px; z-index: 4; max-width: min(430px, 80vw); padding: 6px 10px; background: #09131cb3; border-radius: 6px; color: #eaf2ff; font: 11px/1.5 system-ui; pointer-events: none; }
+#flight-status:empty { display: none; }
+button:focus-visible, input:focus-visible, select:focus-visible, summary:focus-visible { outline: 3px solid #80c6ff; outline-offset: 3px; }
+@media (max-width: 600px) { .flight-dialog { padding: 18px; } #settings-toggle { top: 8px; right: 8px; } .pin-row { flex-wrap: wrap; } .pin-row input { flex: 1 1 100%; } }
+
 * { box-sizing: border-box; }
 
 html, body {

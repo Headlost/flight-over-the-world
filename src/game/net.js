@@ -1,3 +1,4 @@
+import { validMessage } from "./protocol.js";
 import { Peer } from "peerjs";
 
 const PEER_OPTS = {
@@ -28,11 +29,11 @@ const PEER_OPTS = {
 const CONNECT_OPTS = { reliable: true, serialization: "json" };
 
 function roomId() {
-  return "lns" + Math.random().toString(36).slice(2, 8);
+  return "lns" + crypto.randomUUID().replaceAll("-", "");
 }
 
 function guestId() {
-  return "lnsc" + Math.random().toString(36).slice(2, 10);
+  return "lnsc" + crypto.randomUUID().replaceAll("-", "");
 }
 
 function makePeer(id) {
@@ -42,7 +43,8 @@ function makePeer(id) {
 export function parseRoomFromUrl() {
   const h = location.hash.replace(/^#/, "");
   const q = new URLSearchParams(h.includes("=") ? h : `r=${h}`);
-  return q.get("r") || "";
+  const id = q.get("r") || "";
+  return /^[a-zA-Z0-9_-]{3,80}$/.test(id) ? id : "";
 }
 
 export function roomLink(id) {
@@ -81,11 +83,13 @@ export function hostRoom(handlers, existingId) {
   }
 
   function attach(c) {
+    if (conns.size >= 15 || conns.has(c.peer)) { c.close(); return; }
     const pid = c.peer;
     conns.set(pid, c);
     const ready = () => handlers.onPeer?.(pid);
     c.on("open", ready);
-    c.on("data", (data) => handlers.onData?.(data, pid));
+    const accept = messageGate(true);
+    c.on("data", (data) => { if (accept(data)) handlers.onData?.(data, pid); });
     c.on("close", () => {
       conns.delete(pid);
       handlers.onLeft?.(pid);
@@ -151,7 +155,8 @@ export function joinRoom(hostId, handlers) {
       handlers.onOpen?.(hostId, myId);
       handlers.onPeer?.();
     });
-    c.on("data", (data) => handlers.onData?.(data));
+    const accept = messageGate(false);
+    c.on("data", (data) => { if (accept(data)) handlers.onData?.(data); });
     c.on("close", () => {
       if (!destroyed && opened) handlers.onLeft?.();
     });
@@ -224,4 +229,13 @@ export function joinRoom(hostId, handlers) {
   peer.on("call", (call) => handlers.onCall?.(call));
 
   return api;
+}
+
+function messageGate(fromGuest) {
+  let since = performance.now(), count = 0;
+  return data => {
+    const now = performance.now();
+    if (now - since >= 1000) { since = now; count = 0; }
+    return ++count <= (fromGuest ? 100 : 1600) && validMessage(data, fromGuest);
+  };
 }

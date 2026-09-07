@@ -166,32 +166,44 @@ export class PlaneController {
   }
 
   update(dt, ctrl) {
+    if (!Number.isFinite(dt) || dt <= 0 || this.crashed) return;
+    dt = Math.min(dt, 0.05);
     // ctrl: roll -1..1, pitch -1..1, throttle -1..1 tylko dopóki klawisz wciśnięty
     const targetRoll = -ctrl.roll * 0.9;
     const targetPitch = ctrl.pitch * 0.4;
-    this.roll += (targetRoll - this.roll) * Math.min(1, 6 * dt);
-    this.pitch += (targetPitch - this.pitch) * Math.min(1, 4 * dt);
+    this.roll += (targetRoll - this.roll) * (1 - Math.exp(-6 * dt));
+    this.pitch += (targetPitch - this.pitch) * (1 - Math.exp(-4 * dt));
 
     const hold = ctrl.throttle > 0 ? 1 : ctrl.throttle < 0 ? 0 : this.cruiseT;
     const rate = ctrl.throttle !== 0 ? 0.55 : 1.7;
-    this.throttle += (hold - this.throttle) * Math.min(1, rate * dt);
+    this.throttle += (hold - this.throttle) * (1 - Math.exp(-rate * dt));
     const targetSpeed = this.brake + this.throttle * (this.boost - this.brake);
-    this.speed += (targetSpeed - this.speed) * Math.min(1, 2.2 * dt);
+    // Climbing trades speed for height; bank increases induced drag.
+    const drag = Math.abs(this.roll) * 2 + Math.sin(this.pitch) * 9.81;
+    this.speed += (targetSpeed - drag - this.speed) * (1 - Math.exp(-2.2 * dt));
+    this.speed = Math.max(1, this.speed);
 
     // zakręt przez przechylenie
-    this.heading += -Math.sin(this.roll) * (this.speed / 55) * dt * 0.85;
+    this.heading += -9.81 * Math.tan(this.roll) / Math.max(15, this.speed) * dt;
 
     // przeciągnięcie przy małej prędkości
-    const stallSpeed = this.brake + 4;
+    const stallSpeed = (this.brake + 4) / Math.sqrt(Math.max(0.2, Math.cos(this.roll)));
     const stallSink = this.speed < stallSpeed ? (stallSpeed - this.speed) * 1.1 : 0;
     const climb = Math.sin(this.pitch) * this.speed - stallSink;
     const vH = Math.cos(this.pitch) * this.speed;
 
-    const vN = Math.cos(this.heading) * vH;
-    const vE = Math.sin(this.heading) * vH;
-
-    this.lat += (vN * dt) / R_EARTH;
-    this.lon += (vE * dt) / (R_EARTH * Math.cos(this.lat));
+    // Great-circle integration remains finite across poles and the date line.
+    const arc = vH * dt / R_EARTH;
+    const oldLat = this.lat;
+    const nextLat = Math.asin(MathUtils.clamp(Math.sin(oldLat) * Math.cos(arc) + Math.cos(oldLat) * Math.sin(arc) * Math.cos(this.heading), -1, 1));
+    const dLon = Math.atan2(Math.sin(this.heading) * Math.sin(arc) * Math.cos(oldLat), Math.cos(arc) - Math.sin(oldLat) * Math.sin(nextLat));
+    if (arc > 0 && Math.abs(Math.cos(oldLat)) > 1e-10) {
+      const reverse = Math.atan2(-Math.sin(dLon) * Math.cos(oldLat), Math.cos(nextLat) * Math.sin(oldLat) - Math.sin(nextLat) * Math.cos(oldLat) * Math.cos(dLon));
+      this.heading = reverse + Math.PI;
+    }
+    this.lat = nextLat;
+    this.lon = MathUtils.euclideanModulo(this.lon + dLon + Math.PI, Math.PI * 2) - Math.PI;
+    this.heading = MathUtils.euclideanModulo(this.heading, Math.PI * 2);
     this.height += climb * dt;
   }
 

@@ -1,70 +1,38 @@
-# Flight Over the World
+# Flight Over the World — online
 
-Fly over photorealistic Earth – guess the region, find your way home, or just explore. Single player and multiplayer.
+**Graj:** https://headlost.github.io/flight-over-the-world/
 
-**Play:** https://bartosz-ciesielski.github.io/flight-over-the-world/
+Otwórz stronę, wybierz samolot i wystartuj. Gracz nie zakłada konta, nie instaluje programu i nie wpisuje żadnych tokenów ani kluczy.
 
-![Flight over Paris](docs/screens/00-paryz.png)
+## Miejsce startu
 
-![Flight over the fields](docs/screens/04-lot.png)
+Wpisz miasto, adres lub współrzędne (np. `48.8584, 2.2945`) albo kliknij **Choose on map**. Na mapie wybierz miejsce i przesuń pinezkę; zatwierdź **Use this location**. Mapa wyboru korzysta z OpenStreetMap i nie wymaga konta Google. Wyszukiwanie obsługuje Photon.
 
-## Screens
+W Free flight wybrane miejsce jest startem. W Fly home jest celem, a start znajduje się 20–30 km od niego. Guess the region losuje lokalizację. W multiplayer miejsce wybiera gospodarz.
 
-<table>
-  <tr>
-    <td width="50%"><img src="docs/screens/01-start.png" alt="Start screen" /></td>
-    <td width="50%"><img src="docs/screens/02-menu.png" alt="Plane and mode select" /></td>
-  </tr>
-  <tr>
-    <td align="center">Start – single or multiplayer</td>
-    <td align="center">Pick a plane, mode, and map range</td>
-  </tr>
-  <tr>
-    <td><img src="docs/screens/06-ny.png" alt="Flight over New York" /></td>
-    <td><img src="docs/screens/05-crash.png" alt="Crash" /></td>
-  </tr>
-  <tr>
-    <td align="center">Fly anywhere</td>
-    <td align="center">Stay careful :)</td>
-  </tr>
-</table>
+## Sterowanie
 
-## Modes
-
-- **Guess the region** – one minute of flight, then mark on the map where you are (Poland / Europe / World).
-- **Fly home** – start ~30 km from the address you enter, 10 minutes to get back.
-- **Free flight** – pick a city and fly.
-
-## Controls
-
-| Key | Action |
+| Klawisz / gest | Działanie |
 | --- | --- |
-| `W` `A` `S` `D` | Fly |
-| `Shift` | Boost |
-| `Ctrl` | Brake |
-| `T` | Talk (hold) |
-| `Esc` | Pause |
+| W / S | Nos w dół / w górę |
+| A / D | Przechylenie i zakręt |
+| Shift / Ctrl | Szybciej / wolniej |
+| Prawy przycisk myszy i przeciąganie | Obrót kamery |
+| Kółko myszy | Zoom |
+| C | Reset kamery |
+| Esc | Pauza |
+| T (przytrzymaj) | Rozmowa multiplayer |
 
-## Run it locally
+Na telefonie użyj drążka dotykowego. W multiplayer wyślij znajomemu link do pokoju.
 
-Node.js 18+ and a free [Cesium ion](https://ion.cesium.com/) token.
+## Grafika
 
-```bash
-git clone https://github.com/bartosz-ciesielski/flight-over-the-world.git
-cd flight-over-the-world
-npm install
-cp .env.example .env
-```
+W Settings wybierz Performance, Balanced lub **Ultra 4K**. Ultra celuje w bufor 3840 × 2160 przy proporcjach 16:9. Adapt resolution zmniejsza rozdzielczość przy spadkach płynności i przywraca ją, gdy urządzenie nadąża. Aby utrzymać docelowe 4K, wyłącz adaptację.
 
-1. Create an account at [ion.cesium.com](https://ion.cesium.com/).
-2. Create a token (Access tokens).
-3. In My Assets add **Google Photorealistic 3D Tiles** (asset `2275207`).
-4. Put the token in `.env` as `VITE_CESIUM_ION_KEY=…`
+Szczegóły map doczytują się przez Internet. Rozdzielczość obrazu nie zwiększa dokładności źródłowej fotogrametrii; jakość i płynność zależą od zasięgu danych, połączenia oraz GPU. Fizyka pozostaje uproszczonym modelem gry.
 
-```bash
-npm run dev
-```
+## Informacje techniczne
 
-Open the address from the terminal (usually `http://localhost:5173`). In multiplayer one player clicks Multiplayer, the other opens the copied link.
+Gracze nie konfigurują usług. Fotorealistyczny teren nadal pochodzi z Cesium / Google, a dostęp zapewnia konfiguracja publikowanej strony. Nie oznacza to całkowitej niezależności od zewnętrznych usług.
 
-Do not commit the key – `.env` is in `.gitignore`. Tiles do not load in the menu, only after you start a flight.
+Instrukcje utrzymania strony i testów znajdują się w [docs/MAINTENANCE.md](docs/MAINTENANCE.md). [Przegląd poprawek i ograniczeń](docs/REVIEW.md).

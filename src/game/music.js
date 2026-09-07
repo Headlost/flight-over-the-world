@@ -8,8 +8,13 @@ if (el) {
   el.play().catch(() => {});
 }
 
+let lastRetry = 0;
 export function updateMusic() {
-  if (el && el.paused) el.play().catch(() => {});
+  if (!el || !el.paused || document.hidden) return;
+  const now = performance.now();
+  if (now - lastRetry < 3000) return;
+  lastRetry = now;
+  el.play().catch(() => {});
 }
 
 export function primeMusic() {
