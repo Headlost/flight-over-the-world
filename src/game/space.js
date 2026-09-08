@@ -1,8 +1,10 @@
 import {
   AdditiveBlending,
   AmbientLight,
+  BackSide,
   BufferGeometry,
   CanvasTexture,
+  Color,
   DoubleSide,
   Float32BufferAttribute,
   Group,
@@ -16,8 +18,10 @@ import {
   PointsMaterial,
   Quaternion,
   RingGeometry,
+  ShaderMaterial,
   SphereGeometry,
   SRGBColorSpace,
+  TextureLoader,
   TorusGeometry,
   Vector3,
 } from "three";
@@ -26,17 +30,31 @@ import {
 // names, order and appearance remain recognisable while a trip takes seconds,
 // rather than months or years.
 export const SPACE_BODIES = Object.freeze([
-  { name: "Sun",     radius: 330, position: [0, 0, 0],          kind: "sun",     color: "#ffbd45" },
-  { name: "Mercury", radius: 24,  position: [812, 18, 251],     kind: "rock",    color: "#aaa49a" },
-  { name: "Venus",   radius: 51,  position: [-1162, -30, 871],  kind: "venus",   color: "#d6a55f" },
-  { name: "Earth",   radius: 60,  position: [2500, 0, 0],       kind: "earth",   color: "#246fc2" },
-  { name: "Moon",    radius: 17,  position: [2840, 34, -82],    kind: "moon",    color: "#aaa9a4", parent: "Earth" },
-  { name: "Mars",    radius: 42,  position: [2754, 54, 2320],   kind: "mars",    color: "#b74d2c" },
-  { name: "Jupiter", radius: 142, position: [5880, -76, -1192], kind: "jupiter", color: "#d0a77c" },
-  { name: "Saturn",  radius: 119, position: [7387, 92, 3567],   kind: "saturn",  color: "#d8bd7b", rings: true },
-  { name: "Uranus",  radius: 78,  position: [9671, -140, -4089],kind: "ice",     color: "#75d9df", rings: true },
-  { name: "Neptune", radius: 76,  position: [12593, 130, 2291], kind: "ice",     color: "#2e65d2" },
+  { name: "Sun",     radius: 330, position: [0, 0, 0],           kind: "sun",       color: "#ffbd45", hazard: "heat" },
+  { name: "Mercury", radius: 24,  position: [812, 18, 251],      kind: "rock",      color: "#aaa49a", landing: true },
+  { name: "Venus",   radius: 51,  position: [-1162, -30, 871],   kind: "venus",     color: "#d6a55f", atmosphere: "#dca85f", landing: true },
+  { name: "Earth",   radius: 60,  position: [2500, 0, 0],        kind: "earth",     color: "#246fc2", atmosphere: "#5fb9ff", landing: true },
+  { name: "Moon",    radius: 17,  position: [2840, 34, -82],     kind: "moon",      color: "#aaa9a4", parent: "Earth", landing: true },
+  { name: "Mars",    radius: 42,  position: [2754, 54, 2320],    kind: "mars",      color: "#b74d2c", atmosphere: "#d36a45", landing: true },
+  { name: "Jupiter", radius: 142, position: [5880, -76, -1192],  kind: "jupiter",   color: "#d0a77c", atmosphere: "#d9ad7b", gasGiant: true },
+  { name: "Saturn",  radius: 119, position: [7387, 92, 3567],    kind: "saturn",    color: "#d8bd7b", atmosphere: "#e3c986", rings: true, gasGiant: true },
+  { name: "Uranus",  radius: 78,  position: [9671, -140, -4089], kind: "ice",       color: "#75d9df", atmosphere: "#91edf0", rings: true, gasGiant: true },
+  { name: "Neptune", radius: 76,  position: [12593, 130, 2291],  kind: "ice",       color: "#2e65d2", atmosphere: "#4a87ff", gasGiant: true },
+  { name: "Galactic Core", radius: 96, position: [26000, 1200, -19000], kind: "blackhole", color: "#000000", hazard: "blackhole" },
 ]);
+
+const REAL_TEXTURES = Object.freeze({
+  Sun: "sun.jpg",
+  Mercury: "mercury.jpg",
+  Venus: "venus.jpg",
+  Earth: "earth.jpg",
+  Moon: "moon.jpg",
+  Mars: "mars.jpg",
+  Jupiter: "jupiter.jpg",
+  Saturn: "saturn.jpg",
+  Uranus: "uranus.jpg",
+  Neptune: "neptune.jpg",
+});
 
 const UP = new Vector3(0, 1, 0);
 const RIGHT = new Vector3(1, 0, 0);
@@ -93,7 +111,7 @@ export class SpaceFlightController {
   }
 
   setTarget(name, engageCourse = true) {
-    if (!this.bodies.has(name) || name === "Sun") return false;
+    if (!this.bodies.has(name)) return false;
     this.targetName = name;
     this.autopilot = engageCourse;
     this.orbitBody = null;
@@ -129,7 +147,7 @@ export class SpaceFlightController {
       return false;
     }
     const nearest = this.nearestBody();
-    if (!nearest || nearest.distance > maxSurfaceDistance) return false;
+    if (!nearest || nearest.body.hazard || nearest.distance > maxSurfaceDistance) return false;
     const radial = scratchV.copy(this.position).sub(nearest.body.position);
     if (radial.lengthSq() < 1e-5) radial.set(1, 0, 0);
     this.orbitRadius = Math.max(nearest.body.radius + 15, radial.length());
@@ -197,7 +215,7 @@ export class SpaceFlightController {
     let captureDistance = 0;
     if (this.autopilot) {
       const target = this.bodies.get(this.targetName);
-      if (target) {
+      if (target && !target.hazard) {
         const surfaceDistance = Math.max(0, this.position.distanceTo(target.position) - target.radius);
         captureDistance = Math.max(24, target.radius * 0.38);
         if (surfaceDistance <= captureDistance + travel) {
@@ -206,7 +224,7 @@ export class SpaceFlightController {
       }
     }
     this.position.addScaledVector(this.forward, travel);
-    if (this.autopilot && this.targetDistance() <= captureDistance) {
+    if (this.autopilot && captureDistance > 0 && this.targetDistance() <= captureDistance) {
       this.toggleNearestOrbit(captureDistance + 2);
     }
   }
@@ -282,7 +300,7 @@ function planetTexture(body, size) {
 }
 
 function orbitLine(body) {
-  if (body.parent || body.name === "Sun") return null;
+  if (body.parent || body.name === "Sun" || body.hazard === "blackhole") return null;
   const radius = Math.hypot(body.position[0], body.position[2]);
   const points = [];
   for (let i = 0; i <= 128; i++) {
@@ -291,8 +309,164 @@ function orbitLine(body) {
   }
   return new Line(
     new BufferGeometry().setFromPoints(points),
-    new LineBasicMaterial({ color: 0x31506f, transparent: true, opacity: 0.32 }),
+    new LineBasicMaterial({ color: 0x31506f, transparent: true, opacity: 0.12 }),
   );
+}
+
+function createStarSprite() {
+  const canvas = document.createElement("canvas");
+  canvas.width = 64;
+  canvas.height = 64;
+  const ctx = canvas.getContext("2d");
+  const glow = ctx.createRadialGradient(32, 32, 0, 32, 32, 32);
+  glow.addColorStop(0, "rgba(255,255,255,1)");
+  glow.addColorStop(0.16, "rgba(224,238,255,.96)");
+  glow.addColorStop(0.48, "rgba(120,175,255,.28)");
+  glow.addColorStop(1, "rgba(0,0,0,0)");
+  ctx.fillStyle = glow;
+  ctx.fillRect(0, 0, 64, 64);
+  return new CanvasTexture(canvas);
+}
+
+function spaceAsset(file) {
+  const base = import.meta.env?.BASE_URL || "/";
+  return `${base}textures/space/${file}`;
+}
+
+function configureTexture(texture, anisotropy = 8) {
+  texture.colorSpace = SRGBColorSpace;
+  texture.anisotropy = anisotropy;
+  return texture;
+}
+
+function loadMaterialMap(loader, material, file, stats, { alphaOnly = false, bumpScale = 0 } = {}) {
+  stats.total += 1;
+  loader.load(spaceAsset(file), (texture) => {
+    configureTexture(texture);
+    if (alphaOnly) material.alphaMap = texture;
+    else {
+      material.map?.dispose?.();
+      material.map = texture;
+      if (bumpScale > 0) {
+        material.bumpMap = texture;
+        material.bumpScale = bumpScale;
+      }
+    }
+    material.needsUpdate = true;
+    stats.loaded += 1;
+  }, undefined, () => { stats.failed += 1; });
+}
+
+function createBlackHole(body) {
+  const root = new Group();
+  root.name = body.name;
+  root.position.set(...body.position);
+  root.userData.body = body;
+
+  const eventHorizon = new Mesh(
+    new SphereGeometry(body.radius, 80, 48),
+    new MeshBasicMaterial({ color: 0x000000 }),
+  );
+  eventHorizon.name = "Event horizon";
+  root.add(eventHorizon);
+
+  const diskMaterial = new ShaderMaterial({
+    transparent: true,
+    depthWrite: false,
+    side: DoubleSide,
+    blending: AdditiveBlending,
+    uniforms: { uTime: { value: 0 } },
+    vertexShader: /* glsl */ `
+      varying vec3 vLocal;
+      void main() {
+        vLocal = position;
+        gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+      }
+    `,
+    fragmentShader: /* glsl */ `
+      varying vec3 vLocal;
+      uniform float uTime;
+      void main() {
+        float r = length(vLocal.xy);
+        float t = clamp((r - 128.0) / 560.0, 0.0, 1.0);
+        float angle = atan(vLocal.y, vLocal.x);
+        float streams = 0.58 + 0.42 * sin(angle * 9.0 - t * 42.0 - uTime * (5.0 - t * 2.0));
+        float turbulence = 0.72 + 0.28 * sin(angle * 31.0 + t * 115.0 + uTime * 1.7);
+        float edge = smoothstep(0.0, 0.05, t) * (1.0 - smoothstep(0.82, 1.0, t));
+        vec3 hot = mix(vec3(1.0, 0.14, 0.015), vec3(1.0, 0.92, 0.54), pow(1.0 - t, 2.2));
+        gl_FragColor = vec4(hot * (0.7 + streams * 1.8), edge * streams * turbulence * 0.9);
+      }
+    `,
+  });
+  const disk = new Mesh(new RingGeometry(128, 690, 256, 18), diskMaterial);
+  disk.name = "Relativistic accretion disk";
+  disk.rotation.x = Math.PI / 2;
+  root.add(disk);
+
+  const haloMaterial = new MeshBasicMaterial({
+    color: 0xffb45d,
+    transparent: true,
+    opacity: 0.55,
+    blending: AdditiveBlending,
+    depthWrite: false,
+  });
+  const halo = new Mesh(new TorusGeometry(body.radius * 1.33, 7, 18, 160), haloMaterial);
+  halo.rotation.x = Math.PI / 2;
+  const photonRing = new Mesh(
+    new TorusGeometry(body.radius * 1.1, 2.5, 12, 128),
+    new MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.75, blending: AdditiveBlending, depthWrite: false }),
+  );
+  photonRing.rotation.x = Math.PI / 2;
+  root.add(halo, photonRing);
+  root.userData.diskMaterial = diskMaterial;
+  root.userData.disk = disk;
+  return root;
+}
+
+function createGalaxy(core, count) {
+  const random = seededRandom(8675309);
+  const positions = new Float32Array(count * 3);
+  const colors = new Float32Array(count * 3);
+  const warm = new Color(0xffd7a2);
+  const cool = new Color(0x7aa7ff);
+  const mixed = new Color();
+  const arms = 5;
+  for (let i = 0; i < count; i++) {
+    const radius = Math.pow(random(), 0.64) * 6400;
+    const arm = i % arms;
+    const angle = arm * Math.PI * 2 / arms + radius * 0.00225 + (random() - 0.5) * (0.28 + radius / 13000);
+    positions[i * 3] = core[0] + Math.cos(angle) * radius;
+    positions[i * 3 + 1] = core[1] + (random() - 0.5) * (120 + radius * 0.09);
+    positions[i * 3 + 2] = core[2] + Math.sin(angle) * radius;
+    mixed.copy(cool).lerp(warm, Math.max(0, 1 - radius / 4200) * (0.5 + random() * 0.5));
+    colors[i * 3] = mixed.r;
+    colors[i * 3 + 1] = mixed.g;
+    colors[i * 3 + 2] = mixed.b;
+  }
+  const geometry = new BufferGeometry();
+  geometry.setAttribute("position", new Float32BufferAttribute(positions, 3));
+  geometry.setAttribute("color", new Float32BufferAttribute(colors, 3));
+  const galaxy = new Points(geometry, new PointsMaterial({
+    vertexColors: true,
+    size: 3.4,
+    sizeAttenuation: true,
+    transparent: true,
+    opacity: 0.82,
+    depthWrite: false,
+    blending: AdditiveBlending,
+  }));
+  galaxy.name = "Milky Way spiral";
+  return galaxy;
+}
+
+function remapRingUvs(geometry, inner, outer) {
+  const positions = geometry.attributes.position;
+  const uvs = geometry.attributes.uv;
+  for (let i = 0; i < positions.count; i++) {
+    const radius = Math.hypot(positions.getX(i), positions.getY(i));
+    uvs.setXY(i, clamp((radius - inner) / (outer - inner), 0, 1), 0.5);
+  }
+  uvs.needsUpdate = true;
 }
 
 export function createSolarSystem({ textureSize = 1024, starCount = 6500 } = {}) {
@@ -300,6 +474,9 @@ export function createSolarSystem({ textureSize = 1024, starCount = 6500 } = {})
   group.name = "playable-solar-system";
   group.visible = false;
   const bodies = new Map();
+  const textures = { loaded: 0, failed: 0, total: 0 };
+  const textureLoader = new TextureLoader();
+  const starSprite = createStarSprite();
   const random = seededRandom(20260908);
   const starPositions = new Float32Array(starCount * 3);
   for (let i = 0; i < starCount; i++) {
@@ -315,7 +492,9 @@ export function createSolarSystem({ textureSize = 1024, starCount = 6500 } = {})
   starGeometry.setAttribute("position", new Float32BufferAttribute(starPositions, 3));
   const stars = new Points(starGeometry, new PointsMaterial({
     color: 0xe7f1ff,
-    size: 5.5,
+    map: starSprite,
+    alphaTest: 0.02,
+    size: 4.2,
     sizeAttenuation: true,
     transparent: true,
     opacity: 0.92,
@@ -324,6 +503,28 @@ export function createSolarSystem({ textureSize = 1024, starCount = 6500 } = {})
   stars.name = "stars";
   group.add(stars, new AmbientLight(0x37516f, 0.3));
 
+  const milkyWayMaterial = new MeshBasicMaterial({ color: 0xffffff, side: BackSide, transparent: true, opacity: 0.42, depthWrite: false });
+  const milkyWayBackdrop = new Mesh(new SphereGeometry(42000, 64, 32), milkyWayMaterial);
+  milkyWayBackdrop.position.set(7000, 0, -3000);
+  milkyWayBackdrop.rotation.y = -0.72;
+  milkyWayBackdrop.name = "Milky Way panorama";
+  milkyWayBackdrop.visible = false;
+  group.add(milkyWayBackdrop);
+  textures.total += 1;
+  textureLoader.load(spaceAsset("milky-way.jpg"), (texture) => {
+    milkyWayMaterial.map = configureTexture(texture);
+    milkyWayMaterial.needsUpdate = true;
+    milkyWayBackdrop.visible = true;
+    textures.loaded += 1;
+  }, undefined, () => { textures.failed += 1; });
+
+  const galacticCore = SPACE_BODIES.find((body) => body.kind === "blackhole");
+  const galaxy = createGalaxy(galacticCore.position, Math.round(starCount * 1.1));
+  galaxy.material.map = starSprite;
+  galaxy.material.alphaTest = 0.02;
+  galaxy.material.needsUpdate = true;
+  group.add(galaxy);
+
   const solarLight = new PointLight(0xffe0aa, 5.2, 30000, 0.25);
   solarLight.position.set(0, 0, 0);
   group.add(solarLight);
@@ -331,11 +532,21 @@ export function createSolarSystem({ textureSize = 1024, starCount = 6500 } = {})
   for (const body of SPACE_BODIES) {
     const line = orbitLine(body);
     if (line) group.add(line);
+    if (body.kind === "blackhole") {
+      const blackHole = createBlackHole(body);
+      bodies.set(body.name, blackHole);
+      group.add(blackHole);
+      continue;
+    }
     const segments = body.radius >= 100 ? 96 : body.radius >= 50 ? 72 : 56;
     const geometry = new SphereGeometry(body.radius, segments, Math.max(32, segments / 2));
+    const fallbackTexture = planetTexture(body, textureSize);
     const material = body.kind === "sun"
-      ? new MeshBasicMaterial({ color: body.color })
-      : new MeshPhongMaterial({ map: planetTexture(body, textureSize), shininess: body.kind === "earth" ? 32 : 4 });
+      ? new MeshBasicMaterial({ map: fallbackTexture, color: 0xffffff })
+      : new MeshPhongMaterial({ map: fallbackTexture, shininess: body.kind === "earth" ? 32 : 4 });
+    loadMaterialMap(textureLoader, material, REAL_TEXTURES[body.name], textures, {
+      bumpScale: body.landing && body.kind !== "earth" ? body.radius * 0.009 : 0,
+    });
     const mesh = new Mesh(geometry, material);
     mesh.name = body.name;
     mesh.position.set(...body.position);
@@ -353,19 +564,45 @@ export function createSolarSystem({ textureSize = 1024, starCount = 6500 } = {})
       group.add(glow);
     }
     if (body.kind === "earth") {
+      const cloudMaterial = new MeshPhongMaterial({ color: 0xffffff, transparent: true, opacity: 0.72, shininess: 20, depthWrite: false });
+      loadMaterialMap(textureLoader, cloudMaterial, "earth-clouds.jpg", textures, { alphaOnly: true });
       const clouds = new Mesh(
         new SphereGeometry(body.radius * 1.012, 72, 36),
-        new MeshPhongMaterial({ color: 0xffffff, transparent: true, opacity: 0.14, shininess: 20, depthWrite: false }),
+        cloudMaterial,
       );
       clouds.name = "Earth clouds";
       clouds.position.copy(mesh.position);
       mesh.userData.clouds = clouds;
       group.add(clouds);
     }
+    if (body.kind === "venus") {
+      const venusCloudMaterial = new MeshPhongMaterial({ color: 0xffffff, transparent: true, opacity: 0.68, shininess: 8, depthWrite: false });
+      loadMaterialMap(textureLoader, venusCloudMaterial, "venus-atmosphere.jpg", textures);
+      const venusClouds = new Mesh(new SphereGeometry(body.radius * 1.018, 72, 36), venusCloudMaterial);
+      venusClouds.name = "Venus atmosphere texture";
+      venusClouds.position.copy(mesh.position);
+      mesh.userData.clouds = venusClouds;
+      group.add(venusClouds);
+    }
+    if (body.atmosphere) {
+      const shell = new Mesh(
+        new SphereGeometry(body.radius * (body.gasGiant ? 1.025 : 1.045), 64, 32),
+        new MeshBasicMaterial({ color: body.atmosphere, side: BackSide, transparent: true, opacity: body.gasGiant ? 0.07 : 0.12, blending: AdditiveBlending, depthWrite: false }),
+      );
+      shell.name = `${body.name} atmospheric glow`;
+      shell.position.copy(mesh.position);
+      group.add(shell);
+    }
     if (body.rings) {
+      const inner = body.radius * 1.28;
+      const outer = body.radius * (body.name === "Saturn" ? 2.15 : 1.72);
+      const ringGeometry = new RingGeometry(inner, outer, 192);
+      remapRingUvs(ringGeometry, inner, outer);
+      const ringMaterial = new MeshBasicMaterial({ color: body.name === "Saturn" ? 0xffffff : 0x89b9b7, side: DoubleSide, transparent: true, opacity: body.name === "Saturn" ? 0.88 : 0.35, depthWrite: false });
+      if (body.name === "Saturn") loadMaterialMap(textureLoader, ringMaterial, "saturn-ring.png", textures);
       const ring = new Mesh(
-        new RingGeometry(body.radius * 1.28, body.radius * (body.name === "Saturn" ? 2.15 : 1.72), 128),
-        new MeshBasicMaterial({ color: body.name === "Saturn" ? 0xd9c28c : 0x89b9b7, side: DoubleSide, transparent: true, opacity: body.name === "Saturn" ? 0.74 : 0.35, depthWrite: false }),
+        ringGeometry,
+        ringMaterial,
       );
       ring.position.copy(mesh.position);
       ring.rotation.x = Math.PI / 2 + mesh.rotation.z;
@@ -382,11 +619,16 @@ export function createSolarSystem({ textureSize = 1024, starCount = 6500 } = {})
 
   function update(dt, targetName, elapsed = 0) {
     for (const [name, mesh] of bodies) {
+      if (mesh.userData.body?.kind === "blackhole") {
+        mesh.userData.diskMaterial.uniforms.uTime.value = elapsed;
+        mesh.userData.disk.rotation.z += dt * 0.08;
+        continue;
+      }
       mesh.rotation.y += dt * (name === "Jupiter" ? 0.12 : name === "Earth" ? 0.075 : 0.035);
       if (mesh.userData.clouds) mesh.userData.clouds.rotation.y -= dt * 0.025;
     }
     const target = bodies.get(targetName);
-    targetMarker.visible = !!target;
+    targetMarker.visible = !!target && !target.userData.body?.hazard;
     if (target) {
       const radius = target.userData.body.radius * (1.3 + Math.sin(elapsed * 2.4) * 0.035);
       targetMarker.position.copy(target.position);
@@ -395,5 +637,5 @@ export function createSolarSystem({ textureSize = 1024, starCount = 6500 } = {})
     }
   }
 
-  return { group, bodies, stars, targetMarker, update };
+  return { group, bodies, stars, targetMarker, textures, update };
 }

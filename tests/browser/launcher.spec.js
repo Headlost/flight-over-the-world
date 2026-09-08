@@ -53,7 +53,7 @@ test('rocket launcher advertises orbital controls and exposes every destination'
   await page.locator('#car-prev').click();
   await expect(page.locator('#car-name')).toHaveText('Rocket');
   await expect(page.locator('#car-desc')).toContainText('R vertical launch to orbit');
-  await expect(page.locator('#space-targets button')).toHaveCount(9);
+  await expect(page.locator('#space-targets button')).toHaveCount(11);
   await expect(page.locator('#space-nav')).toBeHidden();
   await expect(page.locator('body')).toHaveClass(/rocket-selected/);
 });
@@ -73,6 +73,48 @@ test('rocket crosses into orbit, selects Mars and engages hyperdrive', async ({p
   await expect.poll(() => page.evaluate(() => window.__dbg?.hyperdrive)).toBe(true);
   await expect.poll(() => page.evaluate(() => window.__dbg?.spaceSpeed)).toBeGreaterThan(cruise + 100);
   await page.keyboard.up('Shift');
+});
+
+test('space environments support planetary landing, black-hole return and Earth reentry', async ({page}) => {
+  test.setTimeout(30000);
+  await page.goto('/');
+  await expect.poll(() => page.evaluate(() => !!window.__game)).toBe(true);
+  expect(await page.evaluate(() => window.__testRocketLaunch())).toBe(true);
+  await expect.poll(() => page.evaluate(() => window.__dbg?.spaceMode)).toBe(true);
+  const earthTexture = await page.request.get('/textures/space/earth.jpg');
+  const galaxyTexture = await page.request.get('/textures/space/milky-way.jpg');
+  expect(earthTexture.ok()).toBe(true);
+  expect(galaxyTexture.ok()).toBe(true);
+  await expect.poll(() => page.evaluate(() => window.__dbg?.spaceTextures?.loaded), {timeout:10000})
+    .toBe(await page.evaluate(() => window.__dbg.spaceTextures.total));
+  expect(await page.evaluate(() => window.__dbg.spaceTextures.failed)).toBe(0);
+
+  expect(await page.evaluate(() => window.__testSpaceApproach('Mars', -0.2, 28, true))).toBe(true);
+  await expect.poll(() => page.evaluate(() => window.__dbg?.spaceLandedBody)).toBe('Mars');
+  await page.keyboard.press('r');
+  await expect.poll(() => page.evaluate(() => window.__dbg?.orbitBody)).toBe('Mars');
+
+  expect(await page.evaluate(() => window.__testSpaceApproach('Galactic Core', -1, 60))).toBe(true);
+  await expect(page.locator('#interstellar')).toHaveClass(/show/);
+  await expect.poll(() => page.evaluate(() => window.__dbg?.orbitBody), {timeout:7000}).toBe('Earth');
+  await page.locator('#space-enter').click();
+  await expect.poll(() => page.evaluate(() => window.__dbg?.earthReentry)).toBe(true);
+  await expect(page.locator('#space-nav')).toBeHidden();
+  await page.evaluate(() => { window.__game.plane.height = window.__dbg.groundAlt + 6001; });
+  await expect.poll(() => page.evaluate(() => window.__dbg?.earthReentry)).toBe(false);
+});
+
+test('space environments warn near the Sun and destroy a direct impact', async ({page}) => {
+  test.setTimeout(20000);
+  await page.goto('/');
+  await expect.poll(() => page.evaluate(() => !!window.__game)).toBe(true);
+  expect(await page.evaluate(() => window.__testRocketLaunch())).toBe(true);
+  await expect.poll(() => page.evaluate(() => window.__dbg?.spaceMode)).toBe(true);
+  expect(await page.evaluate(() => window.__testSpaceApproach('Sun', 40, 28))).toBe(true);
+  await expect(page.locator('body')).toHaveClass(/solar-warning/);
+  expect(await page.evaluate(() => window.__testSpaceApproach('Sun', -1, 28))).toBe(true);
+  await expect.poll(() => page.evaluate(() => window.__dbg?.crashed)).toBe(true);
+  await expect(page.locator('#f-banner')).toContainText('STAR INCINERATION');
 });
 
 test('invalid coordinates show an actionable error', async ({page}) => {

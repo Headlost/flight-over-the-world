@@ -230,3 +230,16 @@ test('manual space steering cancels course assist and nearby R orbit assist is r
   assert.equal(flight.toggleNearestOrbit(), false);
   assert.equal(flight.orbitBody, null);
 });
+
+test('Sun and galactic core are reachable hazards rather than orbital capture targets', () => {
+  const flight = new SpaceFlightController();
+  flight.enterOrbit('Earth', 36);
+  assert.equal(flight.setTarget('Sun', true), true);
+  const sunDistance = flight.targetDistance();
+  for (let i = 0; i < 30; i++) flight.update(1 / 60, {roll:0,pitch:0,throttle:1});
+  assert.ok(flight.targetDistance() < sunDistance);
+  flight.position.copy(flight.bodies.get('Sun').position).add(new Vector3(340,0,0));
+  assert.equal(flight.toggleNearestOrbit(), false);
+  assert.equal(flight.setTarget('Galactic Core', true), true);
+  assert.equal(flight.targetName, 'Galactic Core');
+});

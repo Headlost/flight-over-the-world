@@ -270,9 +270,15 @@ let planeMesh, plane, beacon;
 let solarSystem = null;
 let earthFog = null;
 let rocketLaunch = null;
+let earthReentry = null;
 let spaceModeActive = false;
 let spaceNotice = "";
 let spaceNoticeUntil = 0;
+let spaceEnvironmentMessage = "";
+let spaceEntryBody = null;
+let spaceLandedBody = null;
+let blackHoleSequence = false;
+let blackHoleTimer = null;
 const spaceFlight = new SpaceFlightController();
 let groundAlt = TERRAIN_ALT;
 let crashed = false;
@@ -473,6 +479,8 @@ const el = {
   spaceNav: document.getElementById("space-nav"),
   spaceModeLabel: document.getElementById("space-mode-label"),
   spaceTargetInfo: document.getElementById("space-target-info"),
+  spaceEnter: document.getElementById("space-enter"),
+  interstellar: document.getElementById("interstellar"),
   lobbyCarCanvas: document.getElementById("lobby-carousel-canvas"),
   lobbyCarPrev: document.getElementById("lobby-car-prev"),
   lobbyCarNext: document.getElementById("lobby-car-next"),
@@ -2348,7 +2356,19 @@ window.addEventListener("keydown", (e) => {
   if (menuOpen || paused || guessOpen) return;
   if (["arrowup","arrowdown","arrowleft","arrowright"," ","control"].includes(k)) e.preventDefault();
   if (spaceModeActive && /^[1-9]$/.test(k)) {
-    selectSpaceTarget(Number(k) - 1);
+    selectSpaceTarget(["Mercury", "Venus", "Earth", "Moon", "Mars", "Jupiter", "Saturn", "Uranus", "Neptune"][Number(k) - 1]);
+    return;
+  }
+  if (spaceModeActive && k === "0") {
+    selectSpaceTarget("Galactic Core");
+    return;
+  }
+  if (spaceModeActive && k === "-") {
+    selectSpaceTarget("Sun");
+    return;
+  }
+  if (spaceModeActive && k === "e" && !e.repeat) {
+    handleSpaceEntryAction();
     return;
   }
   if (k === "c" && !e.repeat) { orbit.yaw = 0; orbit.pitch = 0.25; orbit.zoom = 1; }
@@ -2459,9 +2479,9 @@ function syncTouchUi() {
     const isParachutist = selectedPlane === "parachutist";
     const isRocket = selectedPlane === "rocket";
     const canLaunch = isParachutist && plane?.state === "grounded";
-    el.touchAction.disabled = isParachutist ? !canLaunch : !isRocket || !!rocketLaunch;
+    el.touchAction.disabled = isParachutist ? !canLaunch : !isRocket || !!rocketLaunch || !!earthReentry;
     el.touchAction.textContent = isRocket
-      ? spaceModeActive ? "Orbit assist" : rocketLaunch ? "Launching…" : "Launch to orbit"
+      ? spaceModeActive ? "Orbit assist" : earthReentry ? "Reentering…" : rocketLaunch ? "Launching…" : "Launch to orbit"
       : canLaunch ? "Gentle takeoff" : plane?.state === "launching" ? "Taking off…" : "Land to take off";
   }
   if (!show) {
@@ -2479,11 +2499,12 @@ function tryParachutistLaunch(mode = "gentle") {
   }
 }
 
-const spaceDestinations = SPACE_BODIES.filter((body) => body.name !== "Sun");
+const spaceDestinations = SPACE_BODIES;
 const spaceMatrix = new Matrix4();
 const spaceUp = new Vector3();
 const spaceLook = new Vector3();
 const spaceCameraGoal = new Vector3();
+const spaceCtrl = { roll: 0, pitch: 0, throttle: 0 };
 
 function setSpaceNotice(message, duration = 2600) {
   spaceNotice = message;
@@ -2495,6 +2516,8 @@ function selectSpaceTarget(indexOrName) {
     ? spaceDestinations[indexOrName]
     : spaceDestinations.find((entry) => entry.name === indexOrName);
   if (!body || !spaceFlight.setTarget(body.name, true)) return;
+  spaceEntryBody = null;
+  spaceLandedBody = null;
   document.querySelectorAll("#space-targets button").forEach((button) => {
     button.classList.toggle("selected", button.dataset.body === body.name);
   });
@@ -2504,9 +2527,10 @@ function selectSpaceTarget(indexOrName) {
 document.querySelectorAll("#space-targets button").forEach((button) => {
   button.addEventListener("click", () => selectSpaceTarget(button.dataset.body));
 });
+el.spaceEnter?.addEventListener("click", handleSpaceEntryAction);
 
 function startRocketLaunch() {
-  if (selectedPlane !== "rocket" || !plane || menuOpen || paused || guessOpen || spaceModeActive || rocketLaunch) return;
+  if (selectedPlane !== "rocket" || !plane || menuOpen || paused || guessOpen || spaceModeActive || rocketLaunch || earthReentry) return;
   if (mp.active || mode !== "free") {
     setSpaceNotice("Orbital flight is available in single-player Free flight.", 4200);
     return;
@@ -2522,6 +2546,14 @@ function startRocketLaunch() {
 
 function handleRocketAction() {
   if (spaceModeActive) {
+    if (blackHoleSequence) return;
+    if (spaceLandedBody) {
+      const body = spaceLandedBody;
+      spaceLandedBody = null;
+      spaceFlight.enterOrbit(body, 20);
+      setSpaceNotice(`Launch complete — ${body} orbit established.`);
+      return;
+    }
     const wasOrbiting = !!spaceFlight.orbitBody;
     const entered = spaceFlight.toggleNearestOrbit();
     const nearest = spaceFlight.nearestBody();
@@ -2533,6 +2565,166 @@ function handleRocketAction() {
     return;
   }
   startRocketLaunch();
+}
+
+function handleSpaceEntryAction() {
+  if (!spaceModeActive || blackHoleSequence) return;
+  if (spaceLandedBody) {
+    handleRocketAction();
+    return;
+  }
+  const bodyName = spaceFlight.orbitBody;
+  const body = bodyName ? spaceFlight.bodies.get(bodyName) : null;
+  if (!body || body.hazard) {
+    setSpaceNotice("Establish orbit around a planet before beginning descent.", 3600);
+    return;
+  }
+  if (bodyName === "Earth") {
+    beginEarthReentry();
+    return;
+  }
+  spaceFlight.orbitBody = null;
+  spaceFlight.autopilot = false;
+  spaceFlight.hyperdrive = false;
+  spaceEntryBody = bodyName;
+  spaceFlight.targetName = bodyName;
+  spaceFlight.forward.copy(body.position).sub(spaceFlight.position).normalize();
+  spaceFlight.speed = Math.min(52, Math.max(spaceFlight.precisionSpeed, spaceFlight.speed));
+  setSpaceNotice(body.gasGiant
+    ? `Descending into ${bodyName}. There is no solid surface — pressure becomes fatal below the cloud deck.`
+    : `${bodyName} descent started. Keep Ctrl held for a safe touchdown.`, 5200);
+}
+
+function beginEarthReentry() {
+  if (!spaceModeActive || spaceFlight.orbitBody !== "Earth") return;
+  leaveSpaceFlight();
+  earthReentry = { verticalSpeed: -5200, startedAt: performance.now() };
+  plane.height = 100000;
+  plane.pitch = -Math.PI / 2;
+  plane.roll = 0;
+  plane.speed = Math.abs(earthReentry.verticalSpeed);
+  plane.throttle = 0;
+  pendingSnap = false;
+  awaitingSnap = false;
+  camInit = false;
+  setSpaceNotice("EARTH REENTRY · descending from 100 km · flight control returns below 6 km", 6000);
+}
+
+function updateEarthReentry(dt) {
+  if (!earthReentry || !plane) return;
+  const altitude01 = Math.max(0, Math.min(1, (plane.height - groundAlt) / 100000));
+  const targetVertical = -750 - altitude01 * 4750;
+  earthReentry.verticalSpeed += (targetVertical - earthReentry.verticalSpeed) * (1 - Math.exp(-1.25 * dt));
+  plane.height += earthReentry.verticalSpeed * dt;
+  plane.speed = Math.abs(earthReentry.verticalSpeed);
+  plane.pitch += (-Math.PI / 2 - plane.pitch) * (1 - Math.exp(-4 * dt));
+  plane.roll *= Math.exp(-5 * dt);
+  if (plane.height <= groundAlt + 6000) {
+    earthReentry = null;
+    plane.height = groundAlt + 6000;
+    plane.pitch = -0.12;
+    plane.speed = PLANES.rocket.cruise;
+    plane.throttle = plane.cruiseT;
+    camInit = false;
+    setSpaceNotice("Atmospheric reentry complete — manual flight restored.", 5000);
+  }
+}
+
+function triggerSpaceImpact(title, message) {
+  if (crashed) return;
+  crashed = true;
+  spaceFlight.speed = 0;
+  spaceFlight.hyperdrive = false;
+  if (planeMesh) planeMesh.visible = false;
+  document.body.classList.remove("hyperdrive");
+  showBanner(title, message);
+}
+
+function finishInterstellarJump() {
+  if (!spaceModeActive || !blackHoleSequence) return;
+  blackHoleSequence = false;
+  blackHoleTimer = null;
+  el.interstellar?.classList.remove("show");
+  el.interstellar?.setAttribute("aria-hidden", "true");
+  document.body.classList.remove("black-hole-transit");
+  spaceFlight.reset();
+  selectSpaceTarget("Moon");
+  spaceFlight.enterOrbit("Earth", 36);
+  spaceEntryBody = null;
+  spaceLandedBody = null;
+  crashed = false;
+  planeMesh.visible = true;
+  camInit = false;
+  setSpaceNotice("INTERSTELLAR TRANSIT COMPLETE · returned to Earth orbit", 6000);
+}
+
+function triggerInterstellarJump() {
+  if (blackHoleSequence) return;
+  blackHoleSequence = true;
+  spaceFlight.autopilot = false;
+  spaceFlight.hyperdrive = false;
+  spaceFlight.speed = 0;
+  planeMesh.visible = false;
+  document.body.classList.remove("hyperdrive");
+  document.body.classList.add("black-hole-transit");
+  el.interstellar?.classList.add("show");
+  el.interstellar?.setAttribute("aria-hidden", "false");
+  blackHoleTimer = setTimeout(finishInterstellarJump, 3200);
+}
+
+function checkSpaceEnvironment() {
+  spaceEnvironmentMessage = "";
+  const sunBody = spaceFlight.bodies.get("Sun");
+  const sunDistance = spaceFlight.position.distanceTo(sunBody.position) - sunBody.radius;
+  document.body.classList.toggle("solar-warning", sunDistance < 1300);
+  if (sunDistance <= 0) {
+    triggerSpaceImpact("STAR INCINERATION", "The rocket entered the Sun and was destroyed.");
+    return;
+  }
+  if (sunDistance < 1300) {
+    spaceEnvironmentMessage = `⚠ EXTREME HEAT · Sun surface ${formatSpaceDistance(sunDistance)} · turn away immediately`;
+  }
+
+  const blackHole = spaceFlight.bodies.get("Galactic Core");
+  const blackHoleDistance = spaceFlight.position.distanceTo(blackHole.position) - blackHole.radius;
+  if (blackHoleDistance <= 0) {
+    triggerInterstellarJump();
+    return;
+  }
+  if (blackHoleDistance < 2300) {
+    spaceEnvironmentMessage = `⚠ GRAVITATIONAL ANOMALY · event horizon ${formatSpaceDistance(blackHoleDistance)}`;
+  }
+
+  const nearest = spaceFlight.nearestBody();
+  const body = nearest?.body;
+  if (!body || body.hazard) return;
+  const atmosphereRange = body.atmosphere ? body.radius * (body.gasGiant ? 0.58 : 0.32) : 0;
+  if (nearest.distance < atmosphereRange) {
+    spaceEnvironmentMessage = `${body.name.toUpperCase()} ATMOSPHERE · altitude ${formatSpaceDistance(nearest.distance)} · ${Math.round(spaceFlight.speed)} units/s`;
+  } else if (spaceEntryBody === body.name) {
+    spaceEnvironmentMessage = `${body.name.toUpperCase()} DESCENT · surface ${formatSpaceDistance(nearest.distance)} · Ctrl precision flight`;
+  }
+  if (nearest.distance > 0) return;
+
+  if (body.gasGiant) {
+    triggerSpaceImpact("PRESSURE FAILURE", `${body.name} has no solid surface. The rocket was crushed below the cloud deck.`);
+    return;
+  }
+  const controlledLanding = spaceEntryBody === body.name && spaceFlight.speed <= 48;
+  if (!controlledLanding) {
+    triggerSpaceImpact(`IMPACT ON ${body.name.toUpperCase()}`, "Approach from orbit with E and use precision speed for a safe touchdown.");
+    return;
+  }
+  const radial = spaceFlight.position.clone().sub(body.position);
+  if (radial.lengthSq() < 1e-5) radial.set(1, 0, 0);
+  radial.normalize();
+  spaceFlight.position.copy(body.position).addScaledVector(radial, body.radius + 1.6);
+  spaceFlight.speed = 0;
+  spaceFlight.autopilot = false;
+  spaceFlight.hyperdrive = false;
+  spaceLandedBody = body.name;
+  spaceEntryBody = null;
+  setSpaceNotice(`LANDED ON ${body.name.toUpperCase()} · press R or use Launch to return to orbit`, 7000);
 }
 
 function updateRocketLaunch(dt) {
@@ -2557,6 +2749,10 @@ function enterSpaceFlight() {
   }
   spaceModeActive = true;
   rocketLaunch = null;
+  earthReentry = null;
+  spaceEntryBody = null;
+  spaceLandedBody = null;
+  blackHoleSequence = false;
   pendingSnap = false;
   awaitingSnap = false;
   spaceFlight.reset();
@@ -2573,7 +2769,7 @@ function enterSpaceFlight() {
   scene.background.setHex(0x01030a);
   renderer.setClearColor(0x01030a);
   camera.near = 0.08;
-  camera.far = 50000;
+  camera.far = 100000;
   camera.updateProjectionMatrix();
   firstPersonActive = false;
   if (firstPersonRig) firstPersonRig.visible = false;
@@ -2586,11 +2782,20 @@ function enterSpaceFlight() {
 
 function leaveSpaceFlight() {
   rocketLaunch = null;
+  earthReentry = null;
   spaceModeActive = false;
   spaceFlight.reset();
   spaceNotice = "";
   spaceNoticeUntil = 0;
-  document.body.classList.remove("space-mode", "hyperdrive");
+  spaceEnvironmentMessage = "";
+  spaceEntryBody = null;
+  spaceLandedBody = null;
+  blackHoleSequence = false;
+  if (blackHoleTimer) clearTimeout(blackHoleTimer);
+  blackHoleTimer = null;
+  document.body.classList.remove("space-mode", "hyperdrive", "solar-warning", "black-hole-transit");
+  el.interstellar?.classList.remove("show");
+  el.interstellar?.setAttribute("aria-hidden", "true");
   if (el.spaceNav) el.spaceNav.hidden = true;
   if (solarSystem) solarSystem.group.visible = false;
   if (sky) sky.mesh.visible = true;
@@ -2616,10 +2821,41 @@ function formatSpaceDistance(distance) {
   return distance >= 1000 ? `${(distance / 1000).toFixed(2)}k units` : `${Math.round(distance)} units`;
 }
 
+function renderSpaceCredits() {
+  const label = document.createElement("span");
+  label.textContent = "Planet maps: ";
+  const source = document.createElement("a");
+  source.href = "https://www.solarsystemscope.com/textures/";
+  source.target = "_blank";
+  source.rel = "noopener noreferrer";
+  source.textContent = "Solar System Scope";
+  const license = document.createElement("a");
+  license.href = "https://creativecommons.org/licenses/by/4.0/";
+  license.target = "_blank";
+  license.rel = "noopener noreferrer";
+  license.textContent = "CC BY 4.0";
+  credits.replaceChildren(label, source, license);
+}
+
 function tickSpaceFrame(dt, rawDt, flying) {
-  if (flying) spaceFlight.update(dt, ctrl);
+  const spaceCanMove = flying && !spaceLandedBody && !blackHoleSequence;
+  if (spaceCanMove) {
+    spaceCtrl.roll = ctrl.roll;
+    spaceCtrl.pitch = ctrl.pitch;
+    spaceCtrl.throttle = ctrl.throttle;
+    if (spaceEntryBody) {
+      const entryTarget = spaceFlight.bodies.get(spaceEntryBody);
+      if (entryTarget && Math.abs(ctrl.roll) + Math.abs(ctrl.pitch) < 0.08) {
+        spaceLook.copy(entryTarget.position).sub(spaceFlight.position).normalize();
+        spaceFlight.forward.lerp(spaceLook, 1 - Math.exp(-2.8 * dt)).normalize();
+      }
+      spaceCtrl.throttle = -1;
+    }
+    spaceFlight.update(dt, spaceCtrl);
+    checkSpaceEnvironment();
+  }
   solarSystem.update(dt, spaceFlight.targetName, clock.elapsedTime);
-  document.body.classList.toggle("hyperdrive", !!(flying && spaceFlight.hyperdrive));
+  document.body.classList.toggle("hyperdrive", !!(spaceCanMove && spaceFlight.hyperdrive));
 
   planeMesh.position.copy(spaceFlight.position);
   spaceUp.set(0, 1, 0);
@@ -2628,7 +2864,7 @@ function tickSpaceFrame(dt, rawDt, flying) {
   spaceMatrix.lookAt(spaceFlight.position, spaceLook, spaceUp);
   planeMesh.quaternion.setFromRotationMatrix(spaceMatrix);
   planeMesh.scale.setScalar(0.16);
-  planeMesh.visible = !menuOpen && !crashed;
+  planeMesh.visible = !menuOpen && !crashed && !blackHoleSequence;
 
   const cameraLift = spaceUp.normalize();
   spaceCameraGoal.copy(spaceFlight.position)
@@ -2649,20 +2885,36 @@ function tickSpaceFrame(dt, rawDt, flying) {
   }
   if (solarSystem.targetMarker.visible) solarSystem.targetMarker.lookAt(camera.position);
 
-  updateEngineSound(flying, 0.78 + (spaceFlight.hyperdrive ? 0.22 : 0), spaceFlight.speed / spaceFlight.hyperSpeed, "rocket");
+  updateEngineSound(spaceCanMove, 0.78 + (spaceFlight.hyperdrive ? 0.22 : 0), spaceFlight.speed / spaceFlight.hyperSpeed, "rocket");
   updateMusic();
   if (frameCount % 2 === 0) updateHud(0);
   if (frameCount % 4 === 0) syncTouchUi();
   renderer.render(scene, camera);
 
   const nearest = spaceFlight.nearestBody();
-  const orbitLabel = spaceFlight.orbitBody ? `${spaceFlight.orbitBody} orbit` : spaceFlight.autopilot ? `Course: ${spaceFlight.targetName}` : "Manual flight";
+  const orbitLabel = blackHoleSequence
+    ? "INTERSTELLAR TRANSIT"
+    : spaceLandedBody
+      ? `Landed: ${spaceLandedBody}`
+      : spaceEntryBody
+        ? `${spaceEntryBody} atmospheric entry`
+        : spaceFlight.orbitBody ? `${spaceFlight.orbitBody} orbit` : spaceFlight.autopilot ? `Course: ${spaceFlight.targetName}` : "Manual flight";
   if (el.spaceModeLabel) el.spaceModeLabel.textContent = spaceFlight.hyperdrive ? "HYPERDRIVE" : orbitLabel;
   if (el.spaceTargetInfo) el.spaceTargetInfo.textContent = `Target ${spaceFlight.targetName}: ${formatSpaceDistance(spaceFlight.targetDistance())} · Nearest ${nearest?.body?.name || "–"}: ${formatSpaceDistance(nearest?.distance)}`;
+  if (el.spaceEnter) {
+    const interactBody = spaceLandedBody || spaceFlight.orbitBody;
+    const interact = interactBody ? spaceFlight.bodies.get(interactBody) : null;
+    el.spaceEnter.disabled = !interact || !!interact.hazard || blackHoleSequence;
+    el.spaceEnter.textContent = spaceLandedBody
+      ? `Launch from ${spaceLandedBody}`
+      : interactBody === "Earth"
+        ? "Return through Earth atmosphere"
+        : interact ? `Enter ${interactBody} ${interact.gasGiant ? "clouds" : "surface"}` : "Establish orbit to descend";
+  }
   if (frameCount % 20 === 0) {
     flightStatus.hidden = menuOpen;
     flightStatus.textContent = `${orbitLabel} · ${Math.round(spaceFlight.speed)} units/s · ${Math.round(1 / Math.max(rawDt, 0.001))} FPS`;
-    credits.textContent = "Procedural solar system · compressed gameplay scale";
+    renderSpaceCredits();
   }
   window.__dbg = {
     frame: frameCount,
@@ -2677,6 +2929,11 @@ function tickSpaceFrame(dt, rawDt, flying) {
     orbitBody: spaceFlight.orbitBody,
     target: spaceFlight.targetName,
     targetDistance: spaceFlight.targetDistance(),
+    spaceEntryBody,
+    spaceLandedBody,
+    blackHoleSequence,
+    spaceTextures: { ...solarSystem.textures },
+    crashed,
   };
   window.__cam = camera;
   window.__planeMesh = planeMesh;
@@ -2957,6 +3214,7 @@ function tickFrame() {
     while (left > 0) {
       const s = Math.min(step, left);
       if (rocketLaunch) updateRocketLaunch(s);
+      else if (earthReentry) updateEarthReentry(s);
       else plane.update(s, ctrl);
       left -= s;
       if (spaceModeActive) break;
@@ -3073,7 +3331,7 @@ function tickFrame() {
   }
 
   // sztywna kamera za samolotem — tylko kurs, bez przechyłu/pochylenia
-  const camFrame = frameAt(plane.lat, plane.lon, plane.height, plane.heading, rocketLaunch ? plane.pitch : 0, 0);
+  const camFrame = frameAt(plane.lat, plane.lon, plane.height, plane.heading, rocketLaunch || earthReentry ? plane.pitch : 0, 0);
   camFrame.decompose(camFramePos, camFrameQuat, camFrameScale);
   const firstPerson = selectedPlane === "parachutist" && !menuOpen && orbit.zoom <= 0.56;
   if (firstPerson !== firstPersonActive) {
@@ -3206,7 +3464,7 @@ function tickFrame() {
     : "normal");
   updateDetailCamera();
   // bez kolizji podczas dosadzania — pomiar gruntu jeszcze się doprecyzowuje
-  if (selectedPlane !== "parachutist" && !rocketLaunch && flying && !pendingSnap && (agl < 4 || (frameCount % 4 === 0 && wingHit()))) {
+  if (selectedPlane !== "parachutist" && !rocketLaunch && !earthReentry && flying && !pendingSnap && (agl < 4 || (frameCount % 4 === 0 && wingHit()))) {
     crash();
   }
 
@@ -3282,7 +3540,9 @@ function tickFrame() {
     const detailLabel = terrainDetailMode === 'street' && tiles.isLoading
       ? ` · Sharpening current view ${detailProgress}%…`
       : terrainDetailMode === 'street' ? ' · Ground detail ready' : tiles.isLoading ? ' · Streaming terrain…' : '';
-    const launchLabel = rocketLaunch ? ` · Vertical launch ${Math.round(plane.height / 1000)} km / 100 km` : '';
+    const launchLabel = rocketLaunch
+      ? ` · Vertical launch ${Math.round(plane.height / 1000)} km / 100 km`
+      : earthReentry ? ` · Earth reentry ${Math.round(Math.max(0, agl) / 1000)} km` : '';
     flightStatus.textContent = loadError || QUALITY[settings.quality].label + ' · ' + canvas.width + ' × ' + canvas.height + ' · ' + Math.round(1 / Math.max(rawDt,0.001)) + ' FPS' + launchLabel + detailLabel;
     renderAttributions(credits, tiles.getAttributions([]));
     if (tiles.visibleTiles.size) {
@@ -3336,6 +3596,7 @@ function tickFrame() {
     measuredFps: adaptiveQuality.lastFps,
     terrainCacheFull: tiles.lruCache.isFull(),
     rocketLaunch: !!rocketLaunch,
+    earthReentry: !!earthReentry,
     spaceMode: false,
   };
   window.__cam = camera;
@@ -3362,11 +3623,14 @@ window.__forceTestMate = () => {
 window.__testRocketLaunch = () => {
   if (!navigator.webdriver) return false;
   const rocketIndex = PLANE_ORDER.indexOf("rocket");
+  selectMode("free");
   selectPlane(rocketIndex, 0, true);
   if (planeMesh?.userData?.key !== "rocket") loadPlane("rocket");
   resetFlight(startLat, startLon);
   menuOpen = false;
   paused = false;
+  guessOpen = false;
+  mp.active = false;
   pendingSnap = false;
   awaitingSnap = false;
   crashed = false;
@@ -3376,16 +3640,33 @@ window.__testRocketLaunch = () => {
   el.lobby.classList.add("hidden");
   plane.height = 99980;
   startRocketLaunch();
-  rocketLaunch.velocity = 1200;
+  if (rocketLaunch) rocketLaunch.velocity = 1200;
+  return !!rocketLaunch;
+};
+
+window.__testSpaceApproach = (name, surfaceDistance = 1, speed = 28, entry = false) => {
+  if (!navigator.webdriver || !spaceModeActive) return false;
+  const body = spaceFlight.bodies.get(name);
+  if (!body) return false;
+  spaceFlight.position.copy(body.position).add(new Vector3(body.radius + surfaceDistance, 0, 0));
+  spaceFlight.forward.set(-1, 0, 0);
+  spaceFlight.speed = speed;
+  spaceFlight.autopilot = false;
+  spaceFlight.orbitBody = null;
+  spaceFlight.hyperdrive = false;
+  spaceFlight.targetName = name;
+  spaceEntryBody = entry ? name : null;
+  spaceLandedBody = null;
+  crashed = false;
   return true;
 };
 
 function updateHud(agl) {
   if (spaceModeActive) {
     movementStatus.hidden = false;
-    movementStatus.textContent = performance.now() < spaceNoticeUntil
+    movementStatus.textContent = spaceEnvironmentMessage || (performance.now() < spaceNoticeUntil
       ? spaceNotice
-      : "SPACEFLIGHT · W/S pitch · A/D yaw · Shift hyperdrive · Ctrl precision · R orbit assist · 1–9 select destination";
+      : "SPACEFLIGHT · W/S pitch · A/D yaw · Shift hyperdrive · Ctrl precision · R orbit · E descend · 1–9 planets · 0 galactic core");
     streetViewLink.hidden = true;
     return;
   }
@@ -3403,7 +3684,9 @@ function updateHud(agl) {
         : "CANOPY · A/D steer · S descend + slow · W flatten · zoom in for first-person";
   } else if (selectedPlane === "rocket" && !menuOpen) {
     movementStatus.hidden = false;
-    movementStatus.textContent = performance.now() < spaceNoticeUntil
+    movementStatus.textContent = earthReentry
+      ? `EARTH REENTRY · ${Math.round(Math.max(0, plane.height - groundAlt) / 1000)} km · manual flight below 6 km`
+      : performance.now() < spaceNoticeUntil
       ? spaceNotice
       : rocketLaunch
       ? `VERTICAL LAUNCH · ${Math.round(plane.height / 1000)} km / 100 km · automatic orbital insertion`

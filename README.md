@@ -25,6 +25,8 @@ W Free flight wybrane miejsce jest startem. W Fly home jest celem, a start znajd
 | Spacja | Łagodny, niski start spadochroniarza po lądowaniu |
 | R | Szybki start spadochroniarza; rakietą pionowy start na orbitę, a w kosmosie asysta orbitalna |
 | 1–9 | W trybie kosmicznym wybór planety i ustawienie kursu |
+| E | Zejście z orbity na powierzchnię albo powrót przez atmosferę Ziemi |
+| 0 / − | Kurs na centrum Drogi Mlecznej / Słońce |
 
 Na telefonie użyj drążka dotykowego. W multiplayer wyślij znajomemu link do pokoju.
 
@@ -38,9 +40,13 @@ Po lądowaniu przycisk **Enter Street View** najpierw wyjaśnia, że na dachu pa
 
 ### Rakieta i lot kosmiczny
 
-W jednoosobowym **Free flight** wybierz **Rocket** i naciśnij `R`. Rakieta ustawia się pionowo, przyspiesza do granicy kosmosu i automatycznie przechodzi na widoczną orbitę Ziemi. Panel kosmiczny pozwala wybrać Merkurego, Wenus, Ziemię, Księżyc, Marsa, Jowisza, Saturna, Urana lub Neptuna. Kliknięcie celu albo klawisze `1–9` ustawiają kurs. `W/S` steruje pochyleniem, `A/D` kierunkiem, `Shift` uruchamia hiperprędkość, a `Ctrl` ułatwia precyzyjne podejście. W pobliżu wybranego świata autopilot przechwytuje orbitę; `R` włącza lub wyłącza asystę orbitalną przy najbliższym obiekcie.
+W jednoosobowym **Free flight** wybierz **Rocket** i naciśnij `R`. Rakieta ustawia się pionowo, przyspiesza do granicy kosmosu i automatycznie przechodzi na widoczną orbitę Ziemi. Panel kosmiczny pozwala wybrać Merkurego, Wenus, Ziemię, Księżyc, Marsa, Jowisza, Saturna, Urana, Neptuna, Słońce lub centrum Drogi Mlecznej. Kliknięcie celu albo klawisze `1–9`, `−` i `0` ustawiają kurs. `W/S` steruje pochyleniem, `A/D` kierunkiem, `Shift` uruchamia hiperprędkość, a `Ctrl` ułatwia precyzyjne podejście. W pobliżu wybranego świata autopilot przechwytuje orbitę; `R` włącza lub wyłącza asystę orbitalną przy najbliższym obiekcie.
 
-Układ Słoneczny powstaje proceduralnie dopiero po osiągnięciu kosmosu. Nie pobiera nowych modeli ani tekstur i nie zużywa dodatkowego limitu API. Odległości i promienie są skompresowane do skali gry, aby lot między planetami trwał kilkanaście sekund. Cesium oferuje osobne powierzchnie 3D Księżyca i Marsa; ich użycie jako trybu lądowania wymagałoby osobnego przełączenia układu współrzędnych i dodatkowego streamingu, dlatego nie są włączane podczas przelotu.
+Na orbicie `E` lub przycisk pod listą celów rozpoczyna zejście. Na Merkurym, Wenus, Księżycu i Marsie można bezpiecznie osiąść przy małej prędkości, a `R` ponownie wynosi rakietę na orbitę. Gazowe olbrzymy nie mają stałej powierzchni — zejście pod warstwę chmur kończy się zniszczeniem przez ciśnienie. Powrót z orbity Ziemi zaczyna się na wysokości 100 km, a poniżej 6 km oddaje sterowanie graczowi i ponownie uruchamia fotorealistyczny renderer terenu.
+
+Zbliżenie do Słońca pokazuje ostrzeżenie o skrajnym cieple, a przekroczenie powierzchni niszczy rakietę. Centrum proceduralnej Drogi Mlecznej zawiera animowaną czarną dziurę z dyskiem akrecyjnym i pierścieniem fotonowym. Przekroczenie horyzontu zdarzeń uruchamia sekwencję **INTERSTELLAR** i przenosi gracza na orbitę Ziemi.
+
+Geometria orbit, atmosfer, galaktyki i czarnej dziury powstaje proceduralnie dopiero po osiągnięciu kosmosu. Powierzchnie planet, Słońca i Księżyca, chmury Ziemi, atmosfera Wenus, pierścienie Saturna i panorama Drogi Mlecznej korzystają z lokalnie dołączonych map 2K [Solar System Scope](https://www.solarsystemscope.com/textures/), opartych na danych NASA i udostępnionych na licencji CC BY 4.0. Nie wykonują dodatkowych wywołań API. Odległości i promienie są skompresowane do skali gry, aby lot między planetami trwał kilkanaście sekund.
 
 ## Grafika
 
