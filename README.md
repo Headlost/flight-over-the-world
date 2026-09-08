@@ -16,14 +16,15 @@ W Free flight wybrane miejsce jest startem. W Fly home jest celem, a start znajd
 | --- | --- |
 | W / S | Nos w dół / w górę |
 | A / D | Przechylenie i zakręt |
-| Shift / Ctrl | Szybciej / wolniej (w locie) |
+| Shift / Ctrl | Szybciej / wolniej; w kosmosie hiperprędkość / lot precyzyjny |
 | Prawy przycisk myszy i przeciąganie | Obrót kamery |
 | Kółko myszy | Zoom |
 | C | Reset kamery |
 | Esc | Pauza |
 | T (przytrzymaj) | Rozmowa multiplayer |
 | Spacja | Łagodny, niski start spadochroniarza po lądowaniu |
-| R | Szybki start spadochroniarza na pułap przelotowy |
+| R | Szybki start spadochroniarza; rakietą pionowy start na orbitę, a w kosmosie asysta orbitalna |
+| 1–9 | W trybie kosmicznym wybór planety i ustawienie kursu |
 
 Na telefonie użyj drążka dotykowego. W multiplayer wyślij znajomemu link do pokoju.
 
@@ -34,6 +35,12 @@ W karuzeli pojazdów wybierz **Parachutist**. Stabilny, segmentowy model pilota 
 Podczas zejścia poniżej 240 m gra zaczyna wcześniej pobierać dokładniejsze kafelki. Po lądowaniu renderer najpierw wyostrza obszar widoczny przed graczem, a potem jedną lekką kamerą stopniowo uzupełnia pozostałe kierunki. Gdy liczba klatek spada albo pamięć podręczna jest pełna, pobieranie tła zatrzymuje się automatycznie. Tekstury zachowują mipmapy i używają maksymalnej dostępnej anizotropii do 16×, dzięki czemu dachy i elewacje oglądane pod kątem pozostają czytelniejsze.
 
 Po lądowaniu przycisk **Enter Street View** najpierw wyjaśnia, że na dachu panorama może zacząć się na najbliższej ulicy. Gra otwiera bezkluczowy adres Google Maps w osobnym oknie i zachowuje ekran powrotu; po powrocie do okna gry `Esc` lub `Spacja` zamyka Street View i wznawia lot z zachowanego miejsca. Rozwiązanie nie korzysta z Maps JavaScript API i nie nalicza opłat za wywołania API. Ograniczenia bezpieczeństwa przeglądarki uniemożliwiają odczyt pozycji z osobnej strony, dlatego spacer wykonany w Google Maps nie zmienia miejsca postaci w grze.
+
+### Rakieta i lot kosmiczny
+
+W jednoosobowym **Free flight** wybierz **Rocket** i naciśnij `R`. Rakieta ustawia się pionowo, przyspiesza do granicy kosmosu i automatycznie przechodzi na widoczną orbitę Ziemi. Panel kosmiczny pozwala wybrać Merkurego, Wenus, Ziemię, Księżyc, Marsa, Jowisza, Saturna, Urana lub Neptuna. Kliknięcie celu albo klawisze `1–9` ustawiają kurs. `W/S` steruje pochyleniem, `A/D` kierunkiem, `Shift` uruchamia hiperprędkość, a `Ctrl` ułatwia precyzyjne podejście. W pobliżu wybranego świata autopilot przechwytuje orbitę; `R` włącza lub wyłącza asystę orbitalną przy najbliższym obiekcie.
+
+Układ Słoneczny powstaje proceduralnie dopiero po osiągnięciu kosmosu. Nie pobiera nowych modeli ani tekstur i nie zużywa dodatkowego limitu API. Odległości i promienie są skompresowane do skali gry, aby lot między planetami trwał kilkanaście sekund. Cesium oferuje osobne powierzchnie 3D Księżyca i Marsa; ich użycie jako trybu lądowania wymagałoby osobnego przełączenia układu współrzędnych i dodatkowego streamingu, dlatego nie są włączane podczas przelotu.
 
 ## Grafika
 

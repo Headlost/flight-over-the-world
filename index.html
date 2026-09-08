@@ -126,7 +126,7 @@
           <button id="start-btn" type="button">Start</button>
         </div>
         <p id="menu-error"></p>
-          <p class="hint hint-desk"><kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd> steer · parachutist: <kbd>S</kbd> descend and slow · <kbd>Space</kbd> gentle takeoff · <kbd>R</kbd> rocket launch · <kbd>Esc</kbd> pause<br>Right-drag to look around · scroll fully in for first-person · after landing, use Street View · <kbd>C</kbd> reset camera</p>
+          <p class="hint hint-desk"><kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd> steer · parachutist: <kbd>S</kbd> descend and slow · <kbd>Space</kbd> gentle takeoff · rocket: <kbd>R</kbd> launch to orbit, <kbd>Shift</kbd> hyperdrive · <kbd>Esc</kbd> pause<br>Right-drag to look around · scroll fully in for first-person · after landing, use Street View · <kbd>C</kbd> reset camera</p>
           <p class="hint hint-touch">Drag the stick to steer · use Gentle takeoff after landing</p>
       </div>
     </div>
@@ -199,6 +199,24 @@
         <button id="touch-talk" type="button">Talk</button>
       </div>
     </div>
+
+    <nav id="space-nav" aria-label="Space navigation" hidden>
+      <div class="space-readout">
+        <strong id="space-mode-label">Earth orbit</strong>
+        <span id="space-target-info">Target Moon</span>
+      </div>
+      <div id="space-targets" aria-label="Choose destination">
+        <button type="button" data-body="Mercury"><kbd>1</kbd> Mercury</button>
+        <button type="button" data-body="Venus"><kbd>2</kbd> Venus</button>
+        <button type="button" data-body="Earth"><kbd>3</kbd> Earth</button>
+        <button type="button" data-body="Moon"><kbd>4</kbd> Moon</button>
+        <button type="button" data-body="Mars"><kbd>5</kbd> Mars</button>
+        <button type="button" data-body="Jupiter"><kbd>6</kbd> Jupiter</button>
+        <button type="button" data-body="Saturn"><kbd>7</kbd> Saturn</button>
+        <button type="button" data-body="Uranus"><kbd>8</kbd> Uranus</button>
+        <button type="button" data-body="Neptune"><kbd>9</kbd> Neptune</button>
+      </div>
+    </nav>
 
     <section id="street-mode" aria-label="Street View" aria-hidden="true">
       <div id="streetview"></div>

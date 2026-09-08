@@ -46,6 +46,35 @@ test('parachutist is selectable and its animated model is bundled', async ({page
   await expect(page.locator('body')).toHaveClass(/parachutist-selected/);
 });
 
+test('rocket launcher advertises orbital controls and exposes every destination', async ({page}) => {
+  await page.goto('/');
+  await page.getByRole('button',{name:'Single player',exact:true}).click();
+  await page.locator('#car-prev').click();
+  await page.locator('#car-prev').click();
+  await expect(page.locator('#car-name')).toHaveText('Rocket');
+  await expect(page.locator('#car-desc')).toContainText('R vertical launch to orbit');
+  await expect(page.locator('#space-targets button')).toHaveCount(9);
+  await expect(page.locator('#space-nav')).toBeHidden();
+  await expect(page.locator('body')).toHaveClass(/rocket-selected/);
+});
+
+test('rocket crosses into orbit, selects Mars and engages hyperdrive', async ({page}) => {
+  test.setTimeout(30000);
+  await page.goto('/');
+  await expect.poll(() => page.evaluate(() => !!window.__game)).toBe(true);
+  expect(await page.evaluate(() => window.__testRocketLaunch())).toBe(true);
+  await expect.poll(() => page.evaluate(() => window.__dbg?.spaceMode)).toBe(true);
+  await expect(page.locator('#space-nav')).toBeVisible();
+  await expect(page.locator('#space-mode-label')).toContainText('Earth orbit');
+  await page.locator('#space-targets [data-body=Mars]').click();
+  await expect.poll(() => page.evaluate(() => window.__dbg?.target)).toBe('Mars');
+  const cruise = await page.evaluate(() => window.__dbg.spaceSpeed);
+  await page.keyboard.down('Shift');
+  await expect.poll(() => page.evaluate(() => window.__dbg?.hyperdrive)).toBe(true);
+  await expect.poll(() => page.evaluate(() => window.__dbg?.spaceSpeed)).toBeGreaterThan(cruise + 100);
+  await page.keyboard.up('Shift');
+});
+
 test('invalid coordinates show an actionable error', async ({page}) => {
   await page.goto('/'); await openPicker(page);
   await page.locator('#pin-query').fill('999, 2');

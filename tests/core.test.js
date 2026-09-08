@@ -7,6 +7,7 @@ import { validMessage, escapeHtml } from '../src/game/protocol.js';
 import { renderRatio, AdaptiveQuality, terrainStreamProfile } from '../src/game/quality.js';
 import { disposeModel } from '../src/game/dispose.js';
 import { streetViewUrl } from '../src/game/streetview.js';
+import { SpaceFlightController } from '../src/game/space.js';
 import { Box3, Group, Mesh, BoxGeometry, MeshBasicMaterial, Texture, Vector3 } from 'three';
 
 test('coordinates bypass network and geographic bounds are validated', async () => {
@@ -186,4 +187,46 @@ test('shared model resources are freed exactly once and detached', () => {
   root.add(new Mesh(geometry,material),new Mesh(geometry,material)); parent.add(root);
   disposeModel(root);
   assert.equal(disposed,3); assert.equal(parent.children.length,0);
+});
+
+test('rocket enters a stable visible Earth orbit', () => {
+  const flight = new SpaceFlightController();
+  assert.equal(flight.enterOrbit('Earth', 36), true);
+  const earth = flight.bodies.get('Earth');
+  const radius = flight.position.distanceTo(earth.position);
+  const start = flight.position.clone();
+  for (let i = 0; i < 600; i++) flight.update(1 / 60, {roll:0,pitch:0,throttle:0});
+  assert.equal(flight.orbitBody, 'Earth');
+  assert.ok(Math.abs(flight.position.distanceTo(earth.position) - radius) < 0.001);
+  assert.ok(flight.position.distanceTo(start) > 20);
+});
+
+test('destination course and Shift hyperdrive move the rocket toward a planet', () => {
+  const flight = new SpaceFlightController();
+  flight.enterOrbit('Earth', 36);
+  assert.equal(flight.setTarget('Moon', true), true);
+  const before = flight.targetDistance();
+  for (let i = 0; i < 12; i++) flight.update(1 / 60, {roll:0,pitch:0,throttle:1});
+  assert.equal(flight.orbitBody, null);
+  assert.equal(flight.autopilot, true);
+  assert.ok(flight.speed > flight.cruiseSpeed);
+  assert.ok(flight.targetDistance() < before);
+  for (let i = 0; i < 600 && flight.orbitBody !== 'Moon'; i++) {
+    flight.update(1 / 60, {roll:0,pitch:0,throttle:1});
+  }
+  assert.equal(flight.orbitBody, 'Moon');
+});
+
+test('manual space steering cancels course assist and nearby R orbit assist is reversible', () => {
+  const flight = new SpaceFlightController();
+  flight.enterOrbit('Earth', 36);
+  flight.setTarget('Mars', true);
+  flight.update(1 / 30, {roll:1,pitch:-0.5,throttle:0});
+  assert.equal(flight.autopilot, false);
+  assert.ok(Math.abs(flight.forward.x) > 0.001 || Math.abs(flight.forward.y) > 0.001);
+  flight.position.copy(flight.bodies.get('Earth').position).add(new Vector3(90,0,0));
+  assert.equal(flight.toggleNearestOrbit(), true);
+  assert.equal(flight.orbitBody, 'Earth');
+  assert.equal(flight.toggleNearestOrbit(), false);
+  assert.equal(flight.orbitBody, null);
 });

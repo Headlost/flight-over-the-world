@@ -66,6 +66,7 @@ import {
 import { updateEngineSound, engineDebug } from "./game/engineSound.js";
 import { updateMusic, primeMusic, musicDebug } from "./game/music.js";
 import { streetViewUrl } from "./game/streetview.js";
+import { createSolarSystem, SPACE_BODIES, SpaceFlightController } from "./game/space.js";
 
 // rakieta stoi pionowo (+Y) — połóż ją nosem do przodu (-Z, konwencja lotu)
 function prepareRocket(model) {
@@ -242,7 +243,7 @@ const PLANES = {
     cruise: 220, boost: 600, brake: 120,
     cam: [0, 6, 20],
     name: "Rocket",
-    desc: "Space rocket – cruise 790, max 2160 km/h",
+    desc: "Space rocket · R vertical launch to orbit · Shift hyperdrive between planets",
     sound: "rocket",
     prepare: prepareRocket,
   },
@@ -266,6 +267,13 @@ const HOME_BEACON_M = 1000;
 
 let camera, detailCameras, scene, renderer, tiles, sun, sky, firstPersonRig;
 let planeMesh, plane, beacon;
+let solarSystem = null;
+let earthFog = null;
+let rocketLaunch = null;
+let spaceModeActive = false;
+let spaceNotice = "";
+let spaceNoticeUntil = 0;
+const spaceFlight = new SpaceFlightController();
 let groundAlt = TERRAIN_ALT;
 let crashed = false;
 let finished = false;
@@ -462,6 +470,9 @@ const el = {
   touchBrake: document.getElementById("touch-brake"),
   touchTalk: document.getElementById("touch-talk"),
   touchAction: document.getElementById("touch-action"),
+  spaceNav: document.getElementById("space-nav"),
+  spaceModeLabel: document.getElementById("space-mode-label"),
+  spaceTargetInfo: document.getElementById("space-target-info"),
   lobbyCarCanvas: document.getElementById("lobby-carousel-canvas"),
   lobbyCarPrev: document.getElementById("lobby-car-prev"),
   lobbyCarNext: document.getElementById("lobby-car-next"),
@@ -523,6 +534,7 @@ function selectPlane(i, dir, silent = false) {
   el.lobbyCarName.textContent = spec.name;
   el.lobbyCarDesc.textContent = spec.desc;
   document.body.classList.toggle("parachutist-selected", selectedPlane === "parachutist");
+  document.body.classList.toggle("rocket-selected", selectedPlane === "rocket");
   if (!silent && mp.active && mp.net) {
     mp.net.send({ t: "plane", plane: selectedPlane, from: mp.myId });
     renderLobby();
@@ -1610,7 +1622,8 @@ function init() {
   try {
   scene = new Scene();
   scene.background = new Color(0x8ec8e8);
-  scene.fog = new FogExp2(0x9dd0ea, 0.00007);
+  earthFog = new FogExp2(0x9dd0ea, 0.00007);
+  scene.fog = earthFog;
 
   renderer = new WebGLRenderer({
     antialias: !isMobile,
@@ -1866,6 +1879,7 @@ function loadMate(id, key) {
 }
 
 function resetFlight(latDeg, lonDeg) {
+  leaveSpaceFlight();
   const spec = PLANES[selectedPlane];
   startLat = latDeg;
   startLon = lonDeg;
@@ -2137,6 +2151,7 @@ el.restart.addEventListener("click", () => {
 });
 
 function backToMenu() {
+  leaveSpaceFlight();
   hideBanner();
   menuOpen = true;
   timerActive = false;
@@ -2332,9 +2347,16 @@ window.addEventListener("keydown", (e) => {
   }
   if (menuOpen || paused || guessOpen) return;
   if (["arrowup","arrowdown","arrowleft","arrowright"," ","control"].includes(k)) e.preventDefault();
+  if (spaceModeActive && /^[1-9]$/.test(k)) {
+    selectSpaceTarget(Number(k) - 1);
+    return;
+  }
   if (k === "c" && !e.repeat) { orbit.yaw = 0; orbit.pitch = 0.25; orbit.zoom = 1; }
   if (k === " " && !e.repeat) tryParachutistLaunch("gentle");
-  if (k === "r" && !e.repeat && !crashed && !finished) tryParachutistLaunch("rocket");
+  if (k === "r" && !e.repeat && !crashed && !finished) {
+    if (selectedPlane === "rocket") handleRocketAction();
+    else tryParachutistLaunch("rocket");
+  }
   keys.add(k);
   if (k === "r" && (crashed || finished)) restartMode();
 });
@@ -2420,7 +2442,10 @@ if (el.stick) {
 bindHold(el.touchBoost, () => { touch.boost = true; }, () => { touch.boost = false; });
 bindHold(el.touchBrake, () => { touch.brake = true; }, () => { touch.brake = false; });
 bindHold(el.touchTalk, () => startTalk(), () => stopTalk());
-el.touchAction?.addEventListener("click", () => tryParachutistLaunch("gentle"));
+el.touchAction?.addEventListener("click", () => {
+  if (selectedPlane === "rocket") handleRocketAction();
+  else tryParachutistLaunch("gentle");
+});
 el.touchPause?.addEventListener("click", () => setPaused(true));
 el.stick?.addEventListener("touchmove", (e) => e.preventDefault(), { passive: false });
 
@@ -2431,9 +2456,13 @@ function syncTouchUi() {
   el.touch.classList.toggle("show", show);
   el.touch.classList.toggle("talk", !!(mp.active && mp.net));
   if (el.touchAction) {
-    const canLaunch = selectedPlane === "parachutist" && plane?.state === "grounded";
-    el.touchAction.disabled = !canLaunch;
-    el.touchAction.textContent = canLaunch ? "Gentle takeoff" : plane?.state === "launching" ? "Taking off…" : "Land to take off";
+    const isParachutist = selectedPlane === "parachutist";
+    const isRocket = selectedPlane === "rocket";
+    const canLaunch = isParachutist && plane?.state === "grounded";
+    el.touchAction.disabled = isParachutist ? !canLaunch : !isRocket || !!rocketLaunch;
+    el.touchAction.textContent = isRocket
+      ? spaceModeActive ? "Orbit assist" : rocketLaunch ? "Launching…" : "Launch to orbit"
+      : canLaunch ? "Gentle takeoff" : plane?.state === "launching" ? "Taking off…" : "Land to take off";
   }
   if (!show) {
     resetStick();
@@ -2448,6 +2477,209 @@ function tryParachutistLaunch(mode = "gentle") {
     setParachutistState(planeMesh, plane.state, plane.speed);
     camInit = false;
   }
+}
+
+const spaceDestinations = SPACE_BODIES.filter((body) => body.name !== "Sun");
+const spaceMatrix = new Matrix4();
+const spaceUp = new Vector3();
+const spaceLook = new Vector3();
+const spaceCameraGoal = new Vector3();
+
+function setSpaceNotice(message, duration = 2600) {
+  spaceNotice = message;
+  spaceNoticeUntil = performance.now() + duration;
+}
+
+function selectSpaceTarget(indexOrName) {
+  const body = typeof indexOrName === "number"
+    ? spaceDestinations[indexOrName]
+    : spaceDestinations.find((entry) => entry.name === indexOrName);
+  if (!body || !spaceFlight.setTarget(body.name, true)) return;
+  document.querySelectorAll("#space-targets button").forEach((button) => {
+    button.classList.toggle("selected", button.dataset.body === body.name);
+  });
+  setSpaceNotice(`Course set for ${body.name}. Hold Shift for hyperdrive.`);
+}
+
+document.querySelectorAll("#space-targets button").forEach((button) => {
+  button.addEventListener("click", () => selectSpaceTarget(button.dataset.body));
+});
+
+function startRocketLaunch() {
+  if (selectedPlane !== "rocket" || !plane || menuOpen || paused || guessOpen || spaceModeActive || rocketLaunch) return;
+  if (mp.active || mode !== "free") {
+    setSpaceNotice("Orbital flight is available in single-player Free flight.", 4200);
+    return;
+  }
+  rocketLaunch = { velocity: Math.max(150, plane.speed), startedAt: performance.now() };
+  pendingSnap = false;
+  awaitingSnap = false;
+  plane.roll = 0;
+  plane.pitch = Math.PI / 2;
+  camInit = false;
+  setSpaceNotice("Main engines started — vertical ascent to 100 km.", 3500);
+}
+
+function handleRocketAction() {
+  if (spaceModeActive) {
+    const wasOrbiting = !!spaceFlight.orbitBody;
+    const entered = spaceFlight.toggleNearestOrbit();
+    const nearest = spaceFlight.nearestBody();
+    setSpaceNotice(entered
+      ? `Orbit assist locked to ${spaceFlight.orbitBody}. Press R again to release.`
+      : wasOrbiting
+        ? "Orbit assist released."
+        : `Move closer to ${nearest?.body?.name || "a planet"} to enter orbit.`);
+    return;
+  }
+  startRocketLaunch();
+}
+
+function updateRocketLaunch(dt) {
+  if (!rocketLaunch || !plane) return;
+  rocketLaunch.velocity = Math.min(8600, rocketLaunch.velocity + 1350 * dt);
+  plane.speed = rocketLaunch.velocity;
+  plane.throttle = 1;
+  plane.pitch += (Math.PI / 2 - plane.pitch) * (1 - Math.exp(-8 * dt));
+  plane.roll *= Math.exp(-8 * dt);
+  plane.height += rocketLaunch.velocity * dt;
+  if (plane.height >= 100000) enterSpaceFlight();
+}
+
+function enterSpaceFlight() {
+  if (spaceModeActive) return;
+  if (!solarSystem) {
+    solarSystem = createSolarSystem({
+      textureSize: isMobile ? 512 : 1024,
+      starCount: isMobile ? 3200 : 6500,
+    });
+    scene.add(solarSystem.group);
+  }
+  spaceModeActive = true;
+  rocketLaunch = null;
+  pendingSnap = false;
+  awaitingSnap = false;
+  spaceFlight.reset();
+  selectSpaceTarget("Moon");
+  spaceFlight.enterOrbit("Earth", 36);
+  solarSystem.group.visible = true;
+  tiles.group.visible = false;
+  sky.mesh.visible = false;
+  sun.visible = false;
+  sun.target.visible = false;
+  if (beacon) beacon.visible = false;
+  hideAllMates();
+  scene.fog = null;
+  scene.background.setHex(0x01030a);
+  renderer.setClearColor(0x01030a);
+  camera.near = 0.08;
+  camera.far = 50000;
+  camera.updateProjectionMatrix();
+  firstPersonActive = false;
+  if (firstPersonRig) firstPersonRig.visible = false;
+  setParachutistFirstPerson(planeMesh, false);
+  document.body.classList.add("space-mode");
+  el.spaceNav.hidden = false;
+  camInit = false;
+  setSpaceNotice("Earth orbit reached. Select a destination or fly manually.", 5000);
+}
+
+function leaveSpaceFlight() {
+  rocketLaunch = null;
+  spaceModeActive = false;
+  spaceFlight.reset();
+  spaceNotice = "";
+  spaceNoticeUntil = 0;
+  document.body.classList.remove("space-mode", "hyperdrive");
+  if (el.spaceNav) el.spaceNav.hidden = true;
+  if (solarSystem) solarSystem.group.visible = false;
+  if (sky) sky.mesh.visible = true;
+  if (sun) {
+    sun.visible = true;
+    sun.target.visible = true;
+  }
+  if (scene) {
+    scene.fog = earthFog;
+    if (scene.background?.setHex) scene.background.setHex(0x8ec8e8);
+  }
+  if (renderer) renderer.setClearColor(0x8ec8e8);
+  if (camera) {
+    camera.near = 1;
+    camera.far = 2e6;
+    camera.updateProjectionMatrix();
+  }
+  if (planeMesh) planeMesh.scale.setScalar(1);
+}
+
+function formatSpaceDistance(distance) {
+  if (!Number.isFinite(distance)) return "–";
+  return distance >= 1000 ? `${(distance / 1000).toFixed(2)}k units` : `${Math.round(distance)} units`;
+}
+
+function tickSpaceFrame(dt, rawDt, flying) {
+  if (flying) spaceFlight.update(dt, ctrl);
+  solarSystem.update(dt, spaceFlight.targetName, clock.elapsedTime);
+  document.body.classList.toggle("hyperdrive", !!(flying && spaceFlight.hyperdrive));
+
+  planeMesh.position.copy(spaceFlight.position);
+  spaceUp.set(0, 1, 0);
+  if (Math.abs(spaceFlight.forward.dot(spaceUp)) > 0.94) spaceUp.set(1, 0, 0);
+  spaceLook.copy(spaceFlight.position).add(spaceFlight.forward);
+  spaceMatrix.lookAt(spaceFlight.position, spaceLook, spaceUp);
+  planeMesh.quaternion.setFromRotationMatrix(spaceMatrix);
+  planeMesh.scale.setScalar(0.16);
+  planeMesh.visible = !menuOpen && !crashed;
+
+  const cameraLift = spaceUp.normalize();
+  spaceCameraGoal.copy(spaceFlight.position)
+    .addScaledVector(spaceFlight.forward, -20)
+    .addScaledVector(cameraLift, 7);
+  if (!camInit) camPos.copy(spaceCameraGoal);
+  else camPos.lerp(spaceCameraGoal, 1 - Math.exp(-8 * dt));
+  camInit = true;
+  camera.position.copy(camPos);
+  camTarget.copy(spaceFlight.position).addScaledVector(spaceFlight.forward, 8);
+  camera.up.copy(cameraLift);
+  camera.lookAt(camTarget);
+
+  const targetFov = spaceFlight.hyperdrive ? 86 : 70;
+  if (Math.abs(camera.fov - targetFov) > 0.05) {
+    camera.fov += (targetFov - camera.fov) * Math.min(1, 4 * dt);
+    camera.updateProjectionMatrix();
+  }
+  if (solarSystem.targetMarker.visible) solarSystem.targetMarker.lookAt(camera.position);
+
+  updateEngineSound(flying, 0.78 + (spaceFlight.hyperdrive ? 0.22 : 0), spaceFlight.speed / spaceFlight.hyperSpeed, "rocket");
+  updateMusic();
+  if (frameCount % 2 === 0) updateHud(0);
+  if (frameCount % 4 === 0) syncTouchUi();
+  renderer.render(scene, camera);
+
+  const nearest = spaceFlight.nearestBody();
+  const orbitLabel = spaceFlight.orbitBody ? `${spaceFlight.orbitBody} orbit` : spaceFlight.autopilot ? `Course: ${spaceFlight.targetName}` : "Manual flight";
+  if (el.spaceModeLabel) el.spaceModeLabel.textContent = spaceFlight.hyperdrive ? "HYPERDRIVE" : orbitLabel;
+  if (el.spaceTargetInfo) el.spaceTargetInfo.textContent = `Target ${spaceFlight.targetName}: ${formatSpaceDistance(spaceFlight.targetDistance())} · Nearest ${nearest?.body?.name || "–"}: ${formatSpaceDistance(nearest?.distance)}`;
+  if (frameCount % 20 === 0) {
+    flightStatus.hidden = menuOpen;
+    flightStatus.textContent = `${orbitLabel} · ${Math.round(spaceFlight.speed)} units/s · ${Math.round(1 / Math.max(rawDt, 0.001))} FPS`;
+    credits.textContent = "Procedural solar system · compressed gameplay scale";
+  }
+  window.__dbg = {
+    frame: frameCount,
+    mode,
+    menuOpen,
+    spaceMode: true,
+    rocketLaunch: false,
+    spacePosition: spaceFlight.position.toArray(),
+    spaceForward: spaceFlight.forward.toArray(),
+    spaceSpeed: spaceFlight.speed,
+    hyperdrive: spaceFlight.hyperdrive,
+    orbitBody: spaceFlight.orbitBody,
+    target: spaceFlight.targetName,
+    targetDistance: spaceFlight.targetDistance(),
+  };
+  window.__cam = camera;
+  window.__planeMesh = planeMesh;
 }
 
 function restartMode() {
@@ -2639,6 +2871,7 @@ function updateDetailCamera() {
     tiles.setResolution(detailCamera, width, Math.round(width * 9 / 16));
   }
 }
+let lastAutomatedFrameAt = 0;
 init();
 animate();
 
@@ -2665,8 +2898,16 @@ window.addEventListener("pagehide", () => {
   }
 });
 
-function animate() {
+function animate(now = performance.now()) {
   if (window.__ctxLost) return;
+  // Headless browser tests do not need a full-rate 3D simulation. Capping the
+  // automated renderer prevents software WebGL from saturating the CPU while
+  // keeping controls, resize and loading behaviour representative.
+  if (navigator.webdriver && now - lastAutomatedFrameAt < 66) {
+    requestAnimationFrame(animate);
+    return;
+  }
+  lastAutomatedFrameAt = now;
   try {
     tickFrame();
     requestAnimationFrame(animate);
@@ -2704,15 +2945,27 @@ function tickFrame() {
   ctrl.pitch += (pitchIn - ctrl.pitch) * Math.min(1, 6 * dt);
   ctrl.throttle = touch.boost || keys.has("shift") ? 1 : touch.brake || keys.has("control") ? -1 : 0;
 
+  if (spaceModeActive) {
+    tickSpaceFrame(dt, rawDt, flying);
+    return;
+  }
+
   if (flying) {
     // równe kroki — duży dt przy ładowaniu kafelków nie robi „przeskoku” przy nitro
     let left = dt;
     const step = 1 / 60;
     while (left > 0) {
       const s = Math.min(step, left);
-      plane.update(s, ctrl);
+      if (rocketLaunch) updateRocketLaunch(s);
+      else plane.update(s, ctrl);
       left -= s;
+      if (spaceModeActive) break;
     }
+  }
+
+  if (spaceModeActive) {
+    tickSpaceFrame(dt, rawDt, flying);
+    return;
   }
 
   // dźwięk silnika — obroty z przepustnicy i prędkości, opływ z prędkości
@@ -2820,7 +3073,7 @@ function tickFrame() {
   }
 
   // sztywna kamera za samolotem — tylko kurs, bez przechyłu/pochylenia
-  const camFrame = frameAt(plane.lat, plane.lon, plane.height, plane.heading, 0, 0);
+  const camFrame = frameAt(plane.lat, plane.lon, plane.height, plane.heading, rocketLaunch ? plane.pitch : 0, 0);
   camFrame.decompose(camFramePos, camFrameQuat, camFrameScale);
   const firstPerson = selectedPlane === "parachutist" && !menuOpen && orbit.zoom <= 0.56;
   if (firstPerson !== firstPersonActive) {
@@ -2953,7 +3206,7 @@ function tickFrame() {
     : "normal");
   updateDetailCamera();
   // bez kolizji podczas dosadzania — pomiar gruntu jeszcze się doprecyzowuje
-  if (selectedPlane !== "parachutist" && flying && !pendingSnap && (agl < 4 || (frameCount % 4 === 0 && wingHit()))) {
+  if (selectedPlane !== "parachutist" && !rocketLaunch && flying && !pendingSnap && (agl < 4 || (frameCount % 4 === 0 && wingHit()))) {
     crash();
   }
 
@@ -3029,7 +3282,8 @@ function tickFrame() {
     const detailLabel = terrainDetailMode === 'street' && tiles.isLoading
       ? ` · Sharpening current view ${detailProgress}%…`
       : terrainDetailMode === 'street' ? ' · Ground detail ready' : tiles.isLoading ? ' · Streaming terrain…' : '';
-    flightStatus.textContent = loadError || QUALITY[settings.quality].label + ' · ' + canvas.width + ' × ' + canvas.height + ' · ' + Math.round(1 / Math.max(rawDt,0.001)) + ' FPS' + detailLabel;
+    const launchLabel = rocketLaunch ? ` · Vertical launch ${Math.round(plane.height / 1000)} km / 100 km` : '';
+    flightStatus.textContent = loadError || QUALITY[settings.quality].label + ' · ' + canvas.width + ' × ' + canvas.height + ' · ' + Math.round(1 / Math.max(rawDt,0.001)) + ' FPS' + launchLabel + detailLabel;
     renderAttributions(credits, tiles.getAttributions([]));
     if (tiles.visibleTiles.size) {
       const source = document.createElement('span'); source.textContent = 'Terrain: Google Maps'; credits.prepend(source);
@@ -3081,6 +3335,8 @@ function tickFrame() {
     terrainErrorTarget: tiles.errorTarget,
     measuredFps: adaptiveQuality.lastFps,
     terrainCacheFull: tiles.lruCache.isFull(),
+    rocketLaunch: !!rocketLaunch,
+    spaceMode: false,
   };
   window.__cam = camera;
   window.__planeMesh = planeMesh;
@@ -3103,7 +3359,36 @@ window.__forceTestMate = () => {
   mp.goAt = performance.now();
 };
 
+window.__testRocketLaunch = () => {
+  if (!navigator.webdriver) return false;
+  const rocketIndex = PLANE_ORDER.indexOf("rocket");
+  selectPlane(rocketIndex, 0, true);
+  if (planeMesh?.userData?.key !== "rocket") loadPlane("rocket");
+  resetFlight(startLat, startLon);
+  menuOpen = false;
+  paused = false;
+  pendingSnap = false;
+  awaitingSnap = false;
+  crashed = false;
+  finished = false;
+  el.menu.classList.add("hidden");
+  el.landing.classList.add("hidden");
+  el.lobby.classList.add("hidden");
+  plane.height = 99980;
+  startRocketLaunch();
+  rocketLaunch.velocity = 1200;
+  return true;
+};
+
 function updateHud(agl) {
+  if (spaceModeActive) {
+    movementStatus.hidden = false;
+    movementStatus.textContent = performance.now() < spaceNoticeUntil
+      ? spaceNotice
+      : "SPACEFLIGHT · W/S pitch · A/D yaw · Shift hyperdrive · Ctrl precision · R orbit assist · 1–9 select destination";
+    streetViewLink.hidden = true;
+    return;
+  }
   // skala prędkościomierza pod najszybszy pojazd (nitro), zaokrąglona w górę
   const maxKmh = selectedPlane === "parachutist" ? 60 : Math.ceil((PLANES[selectedPlane].boost * 3.6) / 200) * 200;
   if (el.gSpeed) drawAirspeed(el.gSpeed, plane.kmh, maxKmh);
@@ -3116,6 +3401,13 @@ function updateHud(agl) {
       : plane.state === "launching"
         ? `${plane.launchMode === "rocket" ? "ROCKET LAUNCH" : "GENTLE TAKEOFF"} · steer with A/D · S cancels climb and descends`
         : "CANOPY · A/D steer · S descend + slow · W flatten · zoom in for first-person";
+  } else if (selectedPlane === "rocket" && !menuOpen) {
+    movementStatus.hidden = false;
+    movementStatus.textContent = performance.now() < spaceNoticeUntil
+      ? spaceNotice
+      : rocketLaunch
+      ? `VERTICAL LAUNCH · ${Math.round(plane.height / 1000)} km / 100 km · automatic orbital insertion`
+      : "ROCKET · Press R for vertical launch to orbit · Shift boosts atmospheric flight";
   } else {
     movementStatus.hidden = true;
   }
