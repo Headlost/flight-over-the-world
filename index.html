@@ -4,10 +4,10 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
     <title>Flight Over the World</title>
-    <meta name="description" content="Fly over photorealistic Earth. Guess the region, find your way home, or just explore. Single player and multiplayer." />
+    <meta name="description" content="Free flight over photorealistic Earth, planetary surfaces and deep space. Fly as a parachutist or launch a rocket. Single player and multiplayer." />
     <meta name="robots" content="index, follow" />
     <meta property="og:title" content="Flight Over the World" />
-    <meta property="og:description" content="Fly over photorealistic Earth. Guess the region, find your way home, or just explore." />
+    <meta property="og:description" content="Free flight over Earth and into deep space. Parachutist landings, rockets, planets and a black-hole surprise." />
     <meta property="og:image" content="https://headlost.github.io/flight-over-the-world/og.jpg" />
     <meta property="og:type" content="website" />
     <meta name="twitter:card" content="summary_large_image" />
@@ -36,7 +36,7 @@
     <div id="landing">
       <div class="menu-card landing-card">
         <h1>Flight Over the World</h1>
-        <p class="landing-sub">Fly anywhere. No account or setup needed.</p>
+        <p class="landing-sub">Fly <span class="anywhere-word">anywhere</span>. No account or setup needed.</p>
         <p id="crash-note" hidden></p>
         <div class="landing-modes">
           <button id="btn-solo" type="button">Single player</button>
@@ -58,24 +58,14 @@
           <span id="lobby-car-name">Piper PA-28</span>
           <span id="lobby-car-desc">Light propeller – 170 km/h</span>
         </div>
-        <div class="modes lobby-modes">
-          <button class="mode-card selected" data-mode="guess" type="button">
-            <span class="m-name">Guess the region</span>
-          </button>
-          <button class="mode-card" data-mode="home" type="button">
-            <span class="m-name">Fly home</span>
-          </button>
-          <button class="mode-card" data-mode="free" type="button">
+        <div class="modes lobby-modes single-mode">
+          <button class="mode-card selected" data-mode="free" type="button">
             <span class="m-name">Free flight</span>
           </button>
         </div>
         <p id="lobby-mode-desc"></p>
         <div id="lobby-setup">
-          <div id="lobby-scopes">
-            <button class="scope-btn selected" data-scope="pl" type="button">🇵🇱 Poland</button>
-            <button class="scope-btn" data-scope="eu" type="button">🇪🇺 Europe</button>
-            <button class="scope-btn" data-scope="world" type="button">🌍 World</button>
-          </div>
+          <div id="lobby-scopes" hidden></div>
           <input id="lobby-city" type="text" placeholder="Starting city… e.g. Paris" autocomplete="off" />
         </div>
         <div id="lobby-players" class="lobby-players"></div>
@@ -104,14 +94,8 @@
           <span id="car-desc">Light propeller – 170 km/h</span>
         </div>
 
-        <div class="modes">
-          <button class="mode-card selected" data-mode="guess" type="button">
-            <span class="m-name">Guess the region</span>
-          </button>
-          <button class="mode-card" data-mode="home" type="button">
-            <span class="m-name">Fly home</span>
-          </button>
-          <button class="mode-card" data-mode="free" type="button">
+        <div class="modes single-mode">
+          <button class="mode-card selected" data-mode="free" type="button">
             <span class="m-name">Free flight</span>
           </button>
         </div>
@@ -119,11 +103,7 @@
 
         <div class="start-row">
           <input id="city-input" type="text" placeholder="Starting city… e.g. Paris" autocomplete="off" />
-          <div id="guess-scope" style="display: none">
-            <button class="scope-btn selected" data-scope="pl" type="button">🇵🇱 Poland</button>
-            <button class="scope-btn" data-scope="eu" type="button">🇪🇺 Europe</button>
-            <button class="scope-btn" data-scope="world" type="button">🌍 World</button>
-          </div>
+          <div id="guess-scope" hidden></div>
           <button id="start-btn" type="button">Start</button>
         </div>
         <p id="menu-error"></p>
@@ -222,21 +202,37 @@
       <button id="space-enter" type="button">Establish orbit to descend</button>
     </nav>
 
+    <section id="planet-entry" aria-live="polite" aria-hidden="true">
+      <div class="planet-entry-horizon" aria-hidden="true"></div>
+      <strong id="planet-entry-title">ATMOSPHERIC ENTRY</strong>
+      <span id="planet-entry-detail">Thermal shield active</span>
+    </section>
+
     <section id="interstellar" aria-live="assertive" aria-hidden="true">
       <div class="event-horizon-void" aria-hidden="true"></div>
       <div class="tesseract" aria-hidden="true">
-        <div class="tesseract-core"></div>
+        <div class="tesseract-core"><i></i><i></i><i></i></div>
+        <div class="tesseract-rings"><i></i><i></i><i></i></div>
         <div class="tesseract-shelves">
           <i></i><i></i><i></i><i></i><i></i><i></i>
           <i></i><i></i><i></i><i></i><i></i><i></i>
         </div>
+        <div class="tesseract-books">
+          <b></b><b></b><b></b><b></b><b></b><b></b>
+          <b></b><b></b><b></b><b></b><b></b><b></b>
+        </div>
+      </div>
+      <div id="transit-countdown" class="transit-countdown" aria-hidden="true">
+        <span>UNKNOWN STRUCTURE IN</span><strong>15</strong>
       </div>
       <div id="transit-status" class="interstellar-sub">EVENT HORIZON · NO RETURN</div>
     </section>
 
     <aside id="location-arrival" aria-hidden="true">
       <strong>COOPER FARM · ALBERTA</strong>
-      <span>50.4064° N · 114.2043° W · original filming field</span>
+      <span>50°24′23.1″ N · 114°12′15.4″ W · Interstellar filming field</span>
+      <a id="farm-reference" href="https://www.google.com/maps/place/Interstellar+farm/@50.4067956,-114.2067948,582m/data=!3m1!1e3!4m12!1m5!3m4!2zNTDCsDI0JzIzLjEiTiAxMTTCsDEyJzE1LjQiVw!8m2!3d50.406424!4d-114.204275!3m5!1s0x5371cb000edab3e1:0xda2ffa5756ef5f40!8m2!3d50.4064515!4d-114.2041817!16s%2Fg%2F11ww8p8t3p?entry=ttu&amp;g_ep=EgoyMDI2MDkwMi4wIKXMDSoASAFQAw%3D%3D" target="_blank" rel="noopener noreferrer">Open reference view of the Interstellar farm</a>
+      <small>Rocket ready · press <kbd>R</kbd> to return to Earth orbit · choose <kbd>0</kbd> in space to revisit the black hole</small>
     </aside>
 
     <section id="street-mode" aria-label="Street View" aria-hidden="true">

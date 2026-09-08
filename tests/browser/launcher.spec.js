@@ -16,6 +16,10 @@ test('online launcher has no credential form; adaptive rendering persists', asyn
   const errors=[]; page.on('pageerror', error => errors.push(error.message));
   await page.goto('/');
   await expect(page.getByRole('button',{name:'Single player',exact:true})).toBeVisible();
+  await expect(page.locator('.landing-sub .anywhere-word')).toHaveText('anywhere');
+  await expect(page.locator('#menu .mode-card')).toHaveCount(1);
+  await expect(page.locator('#menu [data-mode=free]')).toHaveClass(/selected/);
+  await expect(page.locator('#menu .scope-btn')).toHaveCount(0);
   await expect(page.locator('dialog[open]')).toHaveCount(0);
   await expect(page.locator('input[type=password]')).toHaveCount(0);
   await page.locator('#settings-toggle').click();
@@ -85,7 +89,7 @@ test('rocket crosses into orbit, selects Mars and engages hyperdrive', async ({p
   await expect.poll(() => page.evaluate(() => window.__dbg?.spaceCameraOrbit?.zoom)).toBeGreaterThan(cameraBefore.zoom);
 });
 
-test('space environments support reentry, planetary landing and the black-hole farm return', async ({page}) => {
+test('space environments support reentry, planetary surface flight and the black-hole farm return', async ({page}) => {
   test.setTimeout(30000);
   await page.goto('/');
   await expect.poll(() => page.evaluate(() => !!window.__game)).toBe(true);
@@ -110,7 +114,8 @@ test('space environments support reentry, planetary landing and the black-hole f
   expect(await page.evaluate(() => window.__testRocketLaunch())).toBe(true);
   await expect.poll(() => page.evaluate(() => window.__dbg?.spaceMode)).toBe(true);
   expect(await page.evaluate(() => window.__testSpaceApproach('Mars', -0.2, 28, true))).toBe(true);
-  await expect.poll(() => page.evaluate(() => window.__dbg?.spaceLandedBody)).toBe('Mars');
+  await expect.poll(() => page.evaluate(() => window.__dbg?.spaceSurfaceBody)).toBe('Mars');
+  await expect(page.locator('#space-mode-label')).toContainText('surface flight');
   await page.keyboard.press('r');
   await expect.poll(() => page.evaluate(() => window.__dbg?.orbitBody)).toBe('Mars');
 
@@ -120,11 +125,17 @@ test('space environments support reentry, planetary landing and the black-hole f
   expect(await page.evaluate(() => window.__testSpaceApproach('Galactic Core', -1, 60))).toBe(true);
   await expect(page.locator('#interstellar')).toHaveClass(/show/);
   await expect(page.locator('#transit-status')).toContainText('EVENT HORIZON');
+  await expect(page.locator('#transit-countdown strong')).toHaveText(/\d{2}/);
   await expect(page.locator('#interstellar')).toHaveClass(/tesseract-phase/, {timeout:3000});
   await expect.poll(() => page.evaluate(() => window.__dbg?.spaceMode), {timeout:7000}).toBe(false);
-  await expect.poll(() => page.evaluate(() => window.__dbg?.selectedPlane)).toBe('parachutist');
-  await expect.poll(() => page.evaluate(() => window.__dbg?.lat)).toBeCloseTo(50.4064, 3);
-  await expect.poll(() => page.evaluate(() => window.__dbg?.lon)).toBeCloseTo(-114.2043, 3);
+  await expect.poll(() => page.evaluate(() => window.__dbg?.selectedPlane)).toBe('rocket');
+  await expect.poll(() => page.evaluate(() => window.__dbg?.cooperFarmRocketReady), {timeout:7000}).toBe(true);
+  await expect.poll(() => page.evaluate(() => window.__dbg?.lat)).toBeCloseTo(50.4064167, 5);
+  await expect.poll(() => page.evaluate(() => window.__dbg?.lon)).toBeCloseTo(-114.2042778, 5);
+  await expect(page.locator('#location-arrival')).toHaveClass(/show/);
+  await expect(page.locator('#farm-reference')).toHaveAttribute('href', /google\.com\/maps\/place\/Interstellar\+farm/);
+  await page.keyboard.press('r');
+  await expect.poll(() => page.evaluate(() => window.__dbg?.rocketLaunch)).toBe(true);
 });
 
 test('space environments warn near the Sun and destroy a direct impact', async ({page}) => {

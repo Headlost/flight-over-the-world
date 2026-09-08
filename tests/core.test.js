@@ -231,6 +231,24 @@ test('manual space steering cancels course assist and nearby R orbit assist is r
   assert.equal(flight.orbitBody, null);
 });
 
+test('guided planetary entry becomes stable low-altitude surface flight', () => {
+  const flight = new SpaceFlightController();
+  const mars = flight.bodies.get('Mars');
+  flight.position.copy(mars.position).add(new Vector3(mars.radius + 2, 0, 0));
+  flight.forward.set(-1, 0, 0);
+  assert.equal(flight.enterSurfaceFlight('Mars', 2.4), true);
+  assert.equal(flight.surfaceBody, 'Mars');
+  const start = flight.position.clone();
+  for (let i = 0; i < 360; i++) flight.update(1 / 60, {roll:0.25,pitch:0,throttle:0});
+  const altitude = flight.position.distanceTo(mars.position) - mars.radius;
+  assert.ok(Number.isFinite(altitude));
+  assert.ok(altitude >= 2.39);
+  assert.ok(flight.position.distanceTo(start) > 8);
+  assert.equal(flight.toggleNearestOrbit(), true);
+  assert.equal(flight.surfaceBody, null);
+  assert.equal(flight.orbitBody, 'Mars');
+});
+
 test('Sun and galactic core are reachable hazards rather than orbital capture targets', () => {
   const flight = new SpaceFlightController();
   flight.enterOrbit('Earth', 36);

@@ -72,6 +72,9 @@ const scratchQ = new Quaternion();
 const scratchV = new Vector3();
 const scratchGravity = new Vector3();
 const scratchVelocity = new Vector3();
+const surfaceUp = new Vector3();
+const surfaceRight = new Vector3();
+const surfaceTangent = new Vector3();
 
 function clamp(value, min, max) {
   return Math.max(min, Math.min(max, value));
@@ -94,6 +97,8 @@ export class SpaceFlightController {
     this.orbitBody = null;
     this.orbitRadius = 0;
     this.orbitAngle = 0;
+    this.surfaceBody = null;
+    this.surfaceClearance = 0;
     this.hyperdrive = false;
     this.gravityIntensity = 0;
     this.gravityTrapped = false;
@@ -108,6 +113,8 @@ export class SpaceFlightController {
     this.orbitBody = null;
     this.orbitRadius = 0;
     this.orbitAngle = 0;
+    this.surfaceBody = null;
+    this.surfaceClearance = 0;
     this.hyperdrive = false;
     this.gravityIntensity = 0;
     this.gravityTrapped = false;
@@ -117,6 +124,7 @@ export class SpaceFlightController {
     const body = this.bodies.get(name);
     if (!body) return false;
     this.orbitBody = name;
+    this.surfaceBody = null;
     this.orbitRadius = body.radius + Math.max(8, clearance);
     this.orbitAngle = 0;
     this.position.copy(body.position).add(new Vector3(this.orbitRadius, 0, 0));
@@ -131,6 +139,7 @@ export class SpaceFlightController {
     this.targetName = name;
     this.autopilot = engageCourse;
     this.orbitBody = null;
+    this.surfaceBody = null;
     if (engageCourse) {
       this.forward.copy(this.bodies.get(name).position).sub(this.position);
       if (this.forward.lengthSq() < 1e-5) this.forward.set(0, 0, -1);
@@ -192,6 +201,11 @@ export class SpaceFlightController {
   }
 
   toggleNearestOrbit(maxSurfaceDistance = 260) {
+    if (this.surfaceBody) {
+      const body = this.surfaceBody;
+      this.surfaceBody = null;
+      return this.enterOrbit(body, 20);
+    }
     if (this.orbitBody) {
       this.orbitBody = null;
       return false;
@@ -209,9 +223,82 @@ export class SpaceFlightController {
     return true;
   }
 
+  enterSurfaceFlight(name, clearance = 3.2) {
+    const body = this.bodies.get(name);
+    if (!body || body.hazard || body.gasGiant || !body.landing || name === "Earth") return false;
+    const radial = surfaceUp.copy(this.position).sub(body.position);
+    if (radial.lengthSq() < 1e-5) radial.set(1, 0, 0);
+    radial.normalize();
+    this.surfaceClearance = Math.max(1.8, clearance);
+    this.position.copy(body.position).addScaledVector(radial, body.radius + this.surfaceClearance);
+    surfaceTangent.copy(this.forward).addScaledVector(radial, -this.forward.dot(radial));
+    if (surfaceTangent.lengthSq() < 1e-5) {
+      surfaceTangent.crossVectors(radial, Math.abs(radial.y) < 0.9 ? UP : RIGHT);
+    }
+    this.forward.copy(surfaceTangent).normalize();
+    this.surfaceBody = name;
+    this.orbitBody = null;
+    this.autopilot = false;
+    this.hyperdrive = false;
+    this.speed = 8;
+    return true;
+  }
+
+  updateSurfaceFlight(dt, controls) {
+    const body = this.bodies.get(this.surfaceBody);
+    if (!body) {
+      this.surfaceBody = null;
+      return;
+    }
+    surfaceUp.copy(this.position).sub(body.position);
+    if (surfaceUp.lengthSq() < 1e-5) surfaceUp.set(1, 0, 0);
+    surfaceUp.normalize();
+
+    const yaw = -(controls.roll || 0) * 1.35 * dt;
+    if (Math.abs(yaw) > 1e-5) {
+      scratchQ.setFromAxisAngle(surfaceUp, yaw);
+      this.forward.applyQuaternion(scratchQ).normalize();
+    }
+    surfaceRight.crossVectors(this.forward, surfaceUp);
+    if (surfaceRight.lengthSq() < 1e-5) surfaceRight.copy(RIGHT);
+    else surfaceRight.normalize();
+    const pitch = -(controls.pitch || 0) * 0.78 * dt;
+    if (Math.abs(pitch) > 1e-5) {
+      scratchQ.setFromAxisAngle(surfaceRight, pitch);
+      this.forward.applyQuaternion(scratchQ).normalize();
+    } else {
+      const vertical = this.forward.dot(surfaceUp);
+      this.forward.addScaledVector(surfaceUp, -vertical * Math.min(1, 1.8 * dt)).normalize();
+    }
+
+    const targetSpeed = controls.throttle > 0 ? 16 : controls.throttle < 0 ? 4.5 : 8.5;
+    this.speed += (targetSpeed - this.speed) * (1 - Math.exp(-2.7 * dt));
+    this.position.addScaledVector(this.forward, this.speed * dt);
+
+    surfaceUp.copy(this.position).sub(body.position);
+    const radius = Math.max(1e-5, surfaceUp.length());
+    const altitude = radius - body.radius;
+    surfaceUp.multiplyScalar(1 / radius);
+    const minAltitude = this.surfaceClearance;
+    const maxAltitude = this.surfaceClearance + Math.max(8, body.radius * 0.22);
+    if (altitude < minAltitude || altitude > maxAltitude) {
+      const clampedAltitude = clamp(altitude, minAltitude, maxAltitude);
+      this.position.copy(body.position).addScaledVector(surfaceUp, body.radius + clampedAltitude);
+      const vertical = this.forward.dot(surfaceUp);
+      if ((altitude < minAltitude && vertical < 0) || (altitude > maxAltitude && vertical > 0)) {
+        this.forward.addScaledVector(surfaceUp, -vertical).normalize();
+      }
+    }
+  }
+
   update(dt, controls = { roll: 0, pitch: 0, throttle: 0 }) {
     if (!Number.isFinite(dt) || dt <= 0) return;
     dt = Math.min(dt, 0.05);
+    if (this.surfaceBody) {
+      this.hyperdrive = false;
+      this.updateSurfaceFlight(dt, controls);
+      return;
+    }
     const manual = Math.abs(controls.roll || 0) + Math.abs(controls.pitch || 0) > 0.08;
     this.hyperdrive = controls.throttle > 0;
     if (manual || this.hyperdrive) {
@@ -524,7 +611,9 @@ export function createSolarSystem({ textureSize = 1024, starCount = 6500 } = {})
       group.add(blackHole);
       continue;
     }
-    const segments = body.radius >= 100 ? 96 : body.radius >= 50 ? 72 : 56;
+    const segments = body.landing && body.name !== "Earth"
+      ? (textureSize >= 1024 ? 104 : 72)
+      : body.radius >= 100 ? 96 : body.radius >= 50 ? 72 : 56;
     const geometry = new SphereGeometry(body.radius, segments, Math.max(32, segments / 2));
     const fallbackTexture = planetTexture(body, textureSize);
     const material = body.kind === "sun"
@@ -603,17 +692,19 @@ export function createSolarSystem({ textureSize = 1024, starCount = 6500 } = {})
   targetMarker.renderOrder = 20;
   group.add(targetMarker);
 
-  function update(dt, targetName, elapsed = 0, cameraPosition = null, blackHoleProximity = 0) {
+  function update(dt, targetName, elapsed = 0, cameraPosition = null, blackHoleProximity = 0, surfaceBody = null) {
     for (const [name, mesh] of bodies) {
       if (mesh.userData.body?.kind === "blackhole") {
         mesh.userData.update?.(elapsed, cameraPosition, blackHoleProximity);
         continue;
       }
-      mesh.rotation.y += dt * (name === "Jupiter" ? 0.12 : name === "Earth" ? 0.075 : 0.035);
-      if (mesh.userData.clouds) mesh.userData.clouds.rotation.y -= dt * 0.025;
+      if (name !== surfaceBody) {
+        mesh.rotation.y += dt * (name === "Jupiter" ? 0.12 : name === "Earth" ? 0.075 : 0.035);
+        if (mesh.userData.clouds) mesh.userData.clouds.rotation.y -= dt * 0.025;
+      }
     }
     const target = bodies.get(targetName);
-    targetMarker.visible = !!target && !target.userData.body?.hazard;
+    targetMarker.visible = !!target && !target.userData.body?.hazard && !surfaceBody;
     if (target) {
       const radius = target.userData.body.radius * (1.3 + Math.sin(elapsed * 2.4) * 0.035);
       targetMarker.position.copy(target.position);
