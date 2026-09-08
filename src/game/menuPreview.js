@@ -60,9 +60,11 @@ export function createCarousel(canvas, items, opts = {}) {
     if (current) frame(current.wingspan);
   }
 
-  function frame(wingspan) {
-    camera.position.set(0, wingspan * 0.42, wingspan * 1.75);
-    camera.lookAt(0, 0, 0);
+  function frame(wingspan, item = null) {
+    const distance = item?.previewDistance ?? 1.75;
+    const height = item?.previewHeight ?? 0.42;
+    camera.position.set(0, wingspan * height, wingspan * distance);
+    camera.lookAt(0, item?.previewTargetY ?? 0, 0);
   }
 
   function show(keyName, dir = 0) {
@@ -73,7 +75,7 @@ export function createCarousel(canvas, items, opts = {}) {
     current = { group: entry.group, wingspan: entry.wingspan, slideX: dir * entry.wingspan * 1.4 };
     currentKey = keyName;
     scene.add(entry.group);
-    frame(entry.wingspan);
+    frame(entry.wingspan, entry.item);
   }
 
   for (const item of items) {
@@ -94,7 +96,7 @@ export function createCarousel(canvas, items, opts = {}) {
       const group = new Group();
       group.add(model);
       applyRotorState(group, false);
-      models.set(item.key, { group, wingspan: item.wingspan });
+      models.set(item.key, { group, wingspan: item.wingspan, item });
       if (item.key === wantedKey && currentKey !== wantedKey) show(item.key);
     });
   }
@@ -107,9 +109,11 @@ export function createCarousel(canvas, items, opts = {}) {
     // wjazd z boku po przełączeniu + powolny obrót pokazowy
     current.slideX *= 0.86;
     current.group.position.x = current.slideX;
-    current.group.rotation.y = t * 0.45;
-    current.group.rotation.z = Math.sin(t * 0.6) * 0.05;
     const item = items.find((entry) => entry.key === currentKey);
+    current.group.rotation.y = item?.previewYaw == null
+      ? t * 0.45
+      : item.previewYaw + Math.sin(t * 0.45) * (item.previewSweep ?? 0.28);
+    current.group.rotation.z = Math.sin(t * 0.6) * 0.05;
     if (item?.update) item.update(current.group.children[0] || current.group, 1 / 60);
     renderer.render(scene, camera);
   }

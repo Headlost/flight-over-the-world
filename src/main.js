@@ -258,7 +258,7 @@ const GUESS_TIME = 60; // 1 min na rozpoznanie terenu
 const HOME_CAPTURE_M = 600;
 const HOME_BEACON_M = 1000;
 
-let camera, scene, renderer, tiles, sun, sky, firstPersonRig;
+let camera, detailCamera, scene, renderer, tiles, sun, sky, firstPersonRig;
 let planeMesh, plane, beacon;
 let groundAlt = TERRAIN_ALT;
 let crashed = false;
@@ -300,6 +300,8 @@ let loadError = null;
 let frameCount = 0;
 let firstPersonActive = false;
 let terrainDetailMode = "normal";
+let detailCameraRegistered = false;
+let terrainDetailChangedAt = 0;
 let selectedPlane = "pa28";
 let menuOpen = true;
 let paused = false;
@@ -468,6 +470,13 @@ const planePreviewItems = PLANE_ORDER.map((k) => ({
   prepare: PLANES[k].prepare,
   build: PLANES[k].build,
   update: k === "parachutist" ? (model, dt) => updateParachutistModel(model, "airborne", 0, dt) : null,
+  ...(k === "parachutist" ? {
+    previewYaw: Math.PI,
+    previewSweep: 0.22,
+    previewDistance: 1.55,
+    previewHeight: 0.27,
+    previewTargetY: 0,
+  } : {}),
 }));
 const carousel = createCarousel(el.carCanvas, planePreviewItems, { mobile: isMobile });
 let lobbyCarousel = createCarousel(el.lobbyCarCanvas, planePreviewItems, {
@@ -1615,6 +1624,7 @@ function init() {
   scene.add(sun.target);
 
   camera = new PerspectiveCamera(70, innerWidth / innerHeight, 1, 2e6);
+  detailCamera = new PerspectiveCamera(92, 16 / 9, 0.1, 2200);
   firstPersonRig = createFirstPersonArms();
   camera.add(firstPersonRig);
   scene.add(camera);
@@ -1632,8 +1642,11 @@ function init() {
   }
   tiles.registerPlugin(new TileCompressionPlugin());
   tiles.registerPlugin(new UpdateOnChangePlugin());
-  tiles.registerPlugin(new UnloadTilesPlugin());
-  tiles.registerPlugin(new TilesFadePlugin());
+  tiles.registerPlugin(new UnloadTilesPlugin({
+    delay: isMobile ? 3500 : 12000,
+    bytesTarget: isMobile ? 220e6 : 700e6,
+  }));
+  tiles.registerPlugin(new TilesFadePlugin({ fadeDuration: 120, maximumFadeOutTiles: 24 }));
   const draco = new DRACOLoader();
   draco.setDecoderPath("https://www.gstatic.com/draco/versioned/decoders/1.5.7/");
   tiles.registerPlugin(new GLTFExtensionsPlugin({ dracoLoader: draco }));
@@ -2443,6 +2456,13 @@ let camInit = false;
 const adaptiveQuality = new AdaptiveQuality();
 const flightStatus = document.createElement('div'); flightStatus.id = 'flight-status'; document.body.append(flightStatus);
 const movementStatus = document.createElement('div'); movementStatus.id = 'movement-status'; movementStatus.hidden = true; document.body.append(movementStatus);
+const streetViewLink = document.createElement('a');
+streetViewLink.id = 'street-view-link';
+streetViewLink.target = '_blank';
+streetViewLink.rel = 'noopener noreferrer';
+streetViewLink.textContent = 'Open actual Street View';
+streetViewLink.hidden = true;
+document.body.append(streetViewLink);
 const credits = document.createElement('div'); credits.id = 'map-credits'; document.body.append(credits);
 const settingsUI = setupSettings(() => { adaptiveQuality.reset(); applyQuality(); }, () => { if (!menuOpen) setPaused(true); });
 setupLocationPicker(() => { if (!menuOpen) setPaused(true); });
@@ -2469,16 +2489,49 @@ function applyQuality() {
 function setTerrainDetail(modeName) {
   if (!tiles || modeName === terrainDetailMode) return;
   terrainDetailMode = modeName;
+  terrainDetailChangedAt = performance.now();
   const q = QUALITY[settings.quality];
   const landing = modeName === "landing";
   const street = modeName === "street";
-  tiles.errorTarget = street ? Math.min(q.error, isMobile ? 4 : 2) : landing ? Math.min(q.error, 4) : q.error;
-  tiles.lruCache.maxSize = street ? (isMobile ? 2800 : 4200) : landing ? 3200 : 2400;
-  tiles.lruCache.minSize = Math.round(tiles.lruCache.maxSize * 0.5);
-  const bytes = street ? Math.max(q.bytes, isMobile ? 420e6 : 900e6) : landing ? Math.max(q.bytes, 600e6) : q.bytes;
+  tiles.errorTarget = street ? Math.min(q.error, isMobile ? 5 : 3) : landing ? Math.min(q.error, isMobile ? 7 : 4) : q.error;
+  tiles.lruCache.maxSize = street ? (isMobile ? 3600 : 7000) : landing ? (isMobile ? 2800 : 5200) : 2400;
+  tiles.lruCache.minSize = Math.round(tiles.lruCache.maxSize * 0.58);
+  const bytes = street ? Math.max(q.bytes, isMobile ? 420e6 : 1000e6) : landing ? Math.max(q.bytes, isMobile ? 360e6 : 720e6) : q.bytes;
   tiles.lruCache.maxBytesSize = bytes;
-  tiles.lruCache.minBytesSize = bytes * 0.6;
+  tiles.lruCache.minBytesSize = bytes * 0.68;
+  tiles.loadSiblings = modeName !== "normal" || !isMobile;
   tiles.setResolutionFromRenderer(camera, renderer);
+}
+
+function updateDetailCamera() {
+  if (!tiles || !detailCamera || !plane) return;
+  const modeAge = performance.now() - terrainDetailChangedAt;
+  const ultra = settings.quality === "ultra";
+  const streetSweep = terrainDetailMode === "street" && ultra && modeAge >= 6000;
+  const active = terrainDetailMode === "landing" || streetSweep;
+  if (terrainDetailMode === "street") {
+    const q = QUALITY[settings.quality];
+    tiles.errorTarget = Math.min(q.error, isMobile ? 4 : ultra && modeAge >= 6000 ? 1.5 : 3);
+  }
+  if (!active) {
+    if (detailCameraRegistered) {
+      tiles.deleteCamera(detailCamera);
+      detailCameraRegistered = false;
+    }
+    return;
+  }
+  if (!detailCameraRegistered) {
+    tiles.setCamera(detailCamera);
+    detailCameraRegistered = true;
+  }
+  const quarterTurn = streetSweep ? Math.floor(modeAge / 5000) % 4 : 0;
+  const detailHeading = plane.heading + quarterTurn * Math.PI / 2;
+  const detailHeight = Math.max(-500, groundAlt) + 1.75;
+  const matrix = frameAt(plane.lat, plane.lon, detailHeight, detailHeading, -0.08, 0);
+  matrix.decompose(detailCamera.position, detailCamera.quaternion, detailCamera.scale);
+  detailCamera.updateMatrixWorld(true);
+  const width = isMobile ? 480 : terrainDetailMode === "street" ? 800 : 640;
+  tiles.setResolution(detailCamera, width, Math.round(width * 9 / 16));
 }
 init();
 animate();
@@ -2572,7 +2625,7 @@ function tickFrame() {
     planeMesh.userData.prop.rotation.z += plane.speed * dt * 1.6;
   }
   spinRotors(planeMesh, dt, plane.speed);
-  if (selectedPlane === "parachutist") updateParachutistModel(planeMesh, plane.state, Math.abs(plane.speed), dt);
+  if (selectedPlane === "parachutist") updateParachutistModel(planeMesh, plane.state, plane.speed, dt);
   for (const mate of mp.mates.values()) {
     if (mate.mesh) spinRotors(mate.mesh, dt, plane.speed);
   }
@@ -2787,8 +2840,9 @@ function tickFrame() {
   }
   const agl = plane.height - groundAlt;
   setTerrainDetail(selectedPlane === "parachutist" && !menuOpen
-    ? plane.state === "grounded" ? "street" : agl < 120 ? "landing" : "normal"
+    ? plane.state === "grounded" ? "street" : agl < 240 ? "landing" : "normal"
     : "normal");
+  updateDetailCamera();
   // bez kolizji podczas dosadzania — pomiar gruntu jeszcze się doprecyzowuje
   if (selectedPlane !== "parachutist" && flying && !pendingSnap && (agl < 4 || (frameCount % 4 === 0 && wingHit()))) {
     crash();
@@ -2862,7 +2916,12 @@ function tickFrame() {
   if (frameCount % 30 === 0) {
     const canvas = renderer.domElement;
     flightStatus.hidden = menuOpen;
-    flightStatus.textContent = loadError || QUALITY[settings.quality].label + ' · ' + canvas.width + ' × ' + canvas.height + ' · ' + Math.round(1 / Math.max(rawDt,0.001)) + ' FPS' + (terrainDetailMode === 'street' && tiles.isLoading ? ' · Loading street detail…' : tiles.isLoading ? ' · Streaming terrain…' : '');
+    const detailProgress = Math.round((tiles.loadProgress || 0) * 100);
+    const streetAge = performance.now() - terrainDetailChangedAt;
+    const detailLabel = terrainDetailMode === 'street' && tiles.isLoading
+      ? settings.quality === 'ultra' && streetAge >= 6000 ? ` · Enhancing surroundings ${detailProgress}%…` : ` · Loading current street view ${detailProgress}%…`
+      : terrainDetailMode === 'street' ? ' · Street detail ready' : tiles.isLoading ? ' · Streaming terrain…' : '';
+    flightStatus.textContent = loadError || QUALITY[settings.quality].label + ' · ' + canvas.width + ' × ' + canvas.height + ' · ' + Math.round(1 / Math.max(rawDt,0.001)) + ' FPS' + detailLabel;
     renderAttributions(credits, tiles.getAttributions([]));
     if (tiles.visibleTiles.size) {
       const source = document.createElement('span'); source.textContent = 'Terrain: Google Maps'; credits.prepend(source);
@@ -2908,6 +2967,9 @@ function tickFrame() {
     movementState: plane.state || "airborne",
     firstPerson: firstPersonActive,
     terrainDetailMode,
+    terrainLoadProgress: tiles.loadProgress,
+    terrainCacheBytes: tiles.lruCache.cachedBytes,
+    detailCameraRegistered,
   };
   window.__cam = camera;
   window.__planeMesh = planeMesh;
@@ -2939,12 +3001,18 @@ function updateHud(agl) {
   if (selectedPlane === "parachutist" && !menuOpen) {
     movementStatus.hidden = false;
     movementStatus.textContent = plane.state === "grounded"
-      ? "ON FOOT · W/S walk · A/D turn · Shift run · zoom in for first-person · Space relaunch"
+      ? "ON FOOT · W/S walk · A/D turn · Shift run · zoom in for first-person · open actual Street View below · Space relaunch"
       : plane.state === "launching"
         ? "RELAUNCHING · steer with A/D"
         : "CANOPY · A/D steer · S descend + slow · W flatten · zoom in for first-person";
   } else {
     movementStatus.hidden = true;
+  }
+  const showStreetView = selectedPlane === "parachutist" && !menuOpen && plane.state === "grounded";
+  streetViewLink.hidden = !showStreetView;
+  if (showStreetView) {
+    const viewpoint = `${plane.latDeg.toFixed(6)},${plane.lonDeg.toFixed(6)}`;
+    streetViewLink.href = `https://www.google.com/maps/@?api=1&map_action=pano&viewpoint=${encodeURIComponent(viewpoint)}&heading=${Math.round(plane.headingDeg)}&pitch=0&fov=80`;
   }
 
   if (timerActive || mode !== "free") {

@@ -1,8 +1,7 @@
 import {
-  AnimationMixer,
-  Box3,
+  BoxGeometry,
   BufferGeometry,
-  DynamicDrawUsage,
+  CylinderGeometry,
   Float32BufferAttribute,
   Group,
   LineBasicMaterial,
@@ -10,63 +9,13 @@ import {
   MathUtils,
   Mesh,
   MeshStandardMaterial,
-  Matrix4,
-  Vector3,
+  SphereGeometry,
 } from "three";
 
 const R_EARTH = 6378137;
 const WALK_SPEED = 1.65;
 const RUN_SPEED = 4.8;
-const _skinVertex = new Vector3();
-
-function createStableCharacter(character) {
-  character.updateMatrixWorld(true);
-  const proxy = new Group();
-  proxy.name = "stable-character";
-  const skins = [];
-  character.traverse((source) => {
-    if (!source.isSkinnedMesh || !source.geometry?.attributes?.position) return;
-    const geometry = source.geometry.clone();
-    geometry.deleteAttribute("skinIndex");
-    geometry.deleteAttribute("skinWeight");
-    geometry.getAttribute("position").setUsage(DynamicDrawUsage);
-    const mesh = new Mesh(geometry, source.material);
-    mesh.castShadow = true;
-    mesh.receiveShadow = true;
-    proxy.add(mesh);
-    skins.push({
-      source,
-      mesh,
-      sourcePosition: source.geometry.getAttribute("position"),
-      outputPosition: geometry.getAttribute("position"),
-      localMatrix: new Matrix4().copy(source.matrixWorld),
-    });
-  });
-  character.visible = skins.length === 0;
-  return { proxy, skins, character, frame: 0, elapsed: 1 };
-}
-
-function updateStableCharacter(stable, dt = 0, force = false) {
-  if (!stable?.skins?.length) return;
-  stable.elapsed += dt;
-  if (!force && stable.elapsed < 1 / 20) return;
-  stable.elapsed = 0;
-  stable.frame += 1;
-  stable.character.updateMatrixWorld(true);
-  for (const skin of stable.skins) {
-    for (let i = 0; i < skin.sourcePosition.count; i++) {
-      _skinVertex.fromBufferAttribute(skin.sourcePosition, i);
-      skin.source.applyBoneTransform(i, _skinVertex).applyMatrix4(skin.localMatrix);
-      skin.outputPosition.setXYZ(i, _skinVertex.x, _skinVertex.y, _skinVertex.z);
-    }
-    skin.outputPosition.needsUpdate = true;
-    if (stable.frame % 10 === 0) skin.mesh.geometry.computeVertexNormals();
-    if (force) {
-      skin.mesh.geometry.computeBoundingSphere();
-      if (skin.mesh.geometry.boundingSphere) skin.mesh.geometry.boundingSphere.radius *= 1.5;
-    }
-  }
-}
+const GROUND_CLEARANCE = 0.32;
 
 function createCanopy() {
   const group = new Group();
@@ -132,78 +81,121 @@ function createCanopy() {
   return group;
 }
 
-export function createParachutistModel(gltf) {
-  const root = new Group();
-  const character = gltf.scene;
-  character.rotation.y = Math.PI;
-  const sourceBox = new Box3().setFromObject(character);
-  const sourceSize = sourceBox.getSize(new Vector3());
-  character.scale.setScalar(1.78 / Math.max(0.01, sourceSize.y));
-  const box = new Box3().setFromObject(character);
-  const center = box.getCenter(new Vector3());
-  character.position.set(-center.x, -box.min.y, -center.z);
-  character.traverse((object) => {
-    if (!object.isMesh) return;
-    object.castShadow = true;
-    object.receiveShadow = true;
-  });
+function material(color, roughness = 0.78, metalness = 0.02) {
+  return new MeshStandardMaterial({ color, roughness, metalness });
+}
 
+function part(geometry, surface, parent, position) {
+  const mesh = new Mesh(geometry, surface);
+  mesh.position.set(...position);
+  mesh.castShadow = true;
+  mesh.receiveShadow = true;
+  parent.add(mesh);
+  return mesh;
+}
+
+function limb(parent, x, y, radius, length, surface) {
+  const joint = new Group();
+  joint.position.set(x, y, 0);
+  parent.add(joint);
+  part(new CylinderGeometry(radius * 0.82, radius, length, 10), surface, joint, [0, -length / 2, 0]);
+  return joint;
+}
+
+function createPilot() {
+  const pilot = new Group();
+  pilot.name = "stable-procedural-pilot";
+  const jacket = material(0x52683f, 0.9);
+  const trousers = material(0x202b31, 0.92);
+  const harness = material(0x161b1f, 0.7);
+  const helmet = material(0xd9e1e4, 0.38, 0.12);
+  const visor = material(0x172d3b, 0.2, 0.35);
+  const gloves = material(0x171b1e, 0.84);
+  const boots = material(0x111416, 0.94);
+
+  const body = new Group();
+  body.position.y = 0.92;
+  pilot.add(body);
+  part(new CylinderGeometry(0.26, 0.32, 0.75, 12), jacket, body, [0, 0.34, 0]);
+  part(new BoxGeometry(0.48, 0.56, 0.2), harness, body, [0, 0.28, 0.19]);
+  part(new BoxGeometry(0.38, 0.42, 0.22), harness, body, [0, 0.27, 0.31]);
+  part(new SphereGeometry(0.22, 16, 12), helmet, body, [0, 0.95, 0]);
+  const face = part(new SphereGeometry(0.18, 14, 10), visor, body, [0, 0.94, -0.11]);
+  face.scale.set(0.88, 0.62, 0.55);
+
+  const arms = [];
+  for (const side of [-1, 1]) {
+    const upper = limb(body, side * 0.34, 0.65, 0.09, 0.48, jacket);
+    upper.rotation.z = -side * 0.12;
+    const lower = limb(upper, 0, -0.48, 0.075, 0.43, jacket);
+    part(new SphereGeometry(0.095, 10, 8), gloves, lower, [0, -0.45, 0]);
+    arms.push({ upper, lower, side });
+  }
+
+  const legs = [];
+  for (const side of [-1, 1]) {
+    const upper = limb(body, side * 0.16, 0, 0.115, 0.56, trousers);
+    const lower = limb(upper, 0, -0.55, 0.09, 0.52, trousers);
+    const boot = part(new BoxGeometry(0.18, 0.15, 0.35), boots, lower, [0, -0.55, -0.08]);
+    legs.push({ upper, lower, boot, side });
+  }
+  return { pilot, body, arms, legs, phase: 0 };
+}
+
+export function createParachutistModel() {
+  const root = new Group();
   const canopy = createCanopy();
-  root.add(character, canopy);
-  const mixer = new AnimationMixer(character);
-  const actions = new Map();
-  for (const clip of gltf.animations || []) actions.set(clip.name.toLowerCase(), mixer.clipAction(clip));
-  const stable = createStableCharacter(character);
-  root.add(stable.proxy);
-  root.userData.parachutist = { mixer, actions, active: null, canopy, character, stable };
+  const character = createPilot();
+  root.add(character.pilot, canopy);
+  root.userData.parachutist = { canopy, character, active: "airborne" };
   root.userData.key = "parachutist";
   setParachutistState(root, "airborne", 0, true);
-  updateStableCharacter(stable, 0, true);
   return root;
 }
 
-export function setParachutistState(root, state, speed = 0, immediate = false) {
+export function setParachutistState(root, state, speed = 0) {
   const rig = root?.userData?.parachutist;
   if (!rig) return;
-  const onGround = state === "grounded";
-  rig.canopy.visible = !onGround;
-  const wanted = onGround
-    ? speed > 3 ? "run" : speed > 0.15 ? "walk" : "idle"
-    : "idle";
-  if (rig.active === wanted) return;
-  const next = rig.actions.get(wanted);
-  if (!next) return;
-  if (rig.active) {
-    const previous = rig.actions.get(rig.active);
-    if (immediate) previous?.stop();
-    else previous?.fadeOut(0.18);
-  }
-  next.reset().play();
-  if (immediate) next.setEffectiveWeight(1);
-  else next.fadeIn(0.18);
-  rig.active = wanted;
+  rig.canopy.visible = state !== "grounded";
+  rig.active = state === "grounded"
+    ? Math.abs(speed) > 3 ? "run" : Math.abs(speed) > 0.15 ? "walk" : "idle"
+    : "airborne";
+}
+
+function approach(current, target, amount) {
+  return current + (target - current) * amount;
 }
 
 export function updateParachutistModel(root, state, speed, dt) {
   const rig = root?.userData?.parachutist;
   if (!rig) return;
   setParachutistState(root, state, speed);
-  const action = rig.actions.get(rig.active);
-  if (action) action.timeScale = rig.active === "walk" ? MathUtils.clamp(speed / WALK_SPEED, 0.65, 1.8) : rig.active === "run" ? MathUtils.clamp(speed / RUN_SPEED, 0.7, 1.5) : 0.65;
-  const stateChanged = rig.renderState !== state;
-  rig.renderState = state;
-  if (state === "grounded") {
-    rig.mixer.update(Math.min(0.05, Math.max(0, dt)));
-    updateStableCharacter(rig.stable, dt);
-  } else if (stateChanged) {
-    rig.mixer.update(0);
-    updateStableCharacter(rig.stable, 0, true);
+  const model = rig.character;
+  const step = Math.min(1, Math.max(0, dt) * 10);
+  const moving = state === "grounded" && Math.abs(speed) > 0.15;
+  const run = Math.abs(speed) > 3;
+  if (moving) model.phase += Math.min(0.05, dt) * (run ? 10.5 : 6.2) * Math.sign(speed || 1);
+  const gait = moving ? Math.sin(model.phase) : 0;
+  const stride = run ? 0.8 : 0.52;
+
+  model.body.position.y = approach(model.body.position.y, state === "grounded" ? 0.92 + Math.abs(Math.sin(model.phase * 2)) * (moving ? 0.035 : 0) : 0.82, step);
+  model.body.rotation.x = approach(model.body.rotation.x, state === "grounded" ? 0 : -0.14, step);
+  for (const arm of model.arms) {
+    const groundSwing = gait * stride * 0.58 * arm.side;
+    arm.upper.rotation.x = approach(arm.upper.rotation.x, state === "grounded" ? groundSwing : 0.78, step);
+    arm.upper.rotation.z = approach(arm.upper.rotation.z, state === "grounded" ? -arm.side * 0.1 : -arm.side * 0.42, step);
+    arm.lower.rotation.x = approach(arm.lower.rotation.x, state === "grounded" ? -Math.max(0, -groundSwing) * 0.35 : -0.58, step);
+  }
+  for (const leg of model.legs) {
+    const legSwing = gait * stride * leg.side;
+    leg.upper.rotation.x = approach(leg.upper.rotation.x, state === "grounded" ? legSwing : -0.72, step);
+    leg.lower.rotation.x = approach(leg.lower.rotation.x, state === "grounded" ? Math.max(0, -legSwing) * 0.82 : 1.05, step);
   }
 }
 
 export function setParachutistFirstPerson(root, enabled) {
   const rig = root?.userData?.parachutist;
-  if (rig?.stable?.proxy) rig.stable.proxy.visible = !enabled;
+  if (rig?.character?.pilot) rig.character.pilot.visible = !enabled;
 }
 
 function advance(controller, distance) {
@@ -278,19 +270,23 @@ export class ParachutistController {
       return;
     }
 
-    const descend = Math.max(0, MathUtils.clamp(ctrl.pitch, -1, 1));
-    const flatten = Math.max(0, -MathUtils.clamp(ctrl.pitch, -1, 1));
-    let targetSpeed = ctrl.throttle > 0 ? this.boost : ctrl.throttle < 0 ? this.brake : this.cruise;
-    targetSpeed += (this.brake - targetSpeed) * descend;
-    targetSpeed += (this.cruise * 0.92 - targetSpeed) * flatten;
+    const pitchInput = MathUtils.clamp(ctrl.pitch, -1, 1);
+    const descend = Math.max(0, pitchInput);
+    // Preserve the original, smoother speed curve. S still brakes while adding
+    // sink, and W returns the glider towards its faster trim response.
+    const speedInput = ctrl.throttle !== 0 ? ctrl.throttle : -pitchInput;
+    const targetSpeed = speedInput > 0.05 ? this.cruise + (this.boost - this.cruise) * speedInput
+      : speedInput < -0.05 ? this.cruise + (this.cruise - this.brake) * speedInput
+      : this.cruise;
     this.speed += (targetSpeed - this.speed) * (1 - Math.exp(-2.4 * dt));
     this.speed = MathUtils.clamp(this.speed, this.brake, this.boost);
     const targetRoll = -ctrl.roll * 0.68;
     this.roll += (targetRoll - this.roll) * (1 - Math.exp(-3.8 * dt));
     this.heading = MathUtils.euclideanModulo(this.heading - Math.tan(this.roll) * 0.58 * dt, Math.PI * 2);
     const fast = Math.max(0, (this.speed - this.cruise) / (this.boost - this.cruise));
-    let targetSink = -(1.15 + descend * 2.85 + fast * fast * 1.65 + Math.abs(this.roll) * 0.35 - flatten * 0.28);
-    if (this.groundClearance < 8) targetSink = Math.max(targetSink, -0.62 - this.groundClearance * 0.1);
+    const flare = Math.max(0, (this.cruise - this.speed) / (this.cruise - this.brake));
+    let targetSink = -(1.2 + fast * fast * 2.25 - flare * 0.18 + Math.abs(this.roll) * 0.35 + descend * 1.75);
+    if (this.groundClearance < 6) targetSink = Math.max(targetSink, -0.45 - this.groundClearance * 0.12);
     this.verticalSpeed += (targetSink - this.verticalSpeed) * (1 - Math.exp(-2.5 * dt));
     this.height += this.verticalSpeed * dt;
     this.pitch += (Math.atan2(this.verticalSpeed, this.speed) - this.pitch) * (1 - Math.exp(-3 * dt));
@@ -300,7 +296,7 @@ export class ParachutistController {
   land(surfaceHeight) {
     if (!Number.isFinite(surfaceHeight)) return;
     this.state = "grounded";
-    this.height = surfaceHeight;
+    this.height = surfaceHeight + GROUND_CLEARANCE;
     this.groundHeight = surfaceHeight;
     this.groundClearance = 0;
     this.launchTarget = null;
@@ -323,7 +319,8 @@ export class ParachutistController {
 
   settleOnSurface(surfaceHeight) {
     if (this.state !== "grounded" || !Number.isFinite(surfaceHeight)) return;
-    const delta = surfaceHeight - this.height;
+    const targetHeight = surfaceHeight + GROUND_CLEARANCE;
+    const delta = targetHeight - this.height;
     const moving = Math.abs(this.speed) > 0.2;
     if (delta < -1.5 && moving) {
       this.state = "airborne";
@@ -339,7 +336,7 @@ export class ParachutistController {
       this.speed = 0;
       return;
     }
-    this.height = surfaceHeight;
+    this.height = targetHeight;
     this.groundHeight = surfaceHeight;
   }
 

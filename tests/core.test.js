@@ -1,12 +1,12 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { PlaneController } from '../src/game/plane.js';
-import { ParachutistController } from '../src/game/paraglider.js';
+import { createParachutistModel, ParachutistController, updateParachutistModel } from '../src/game/paraglider.js';
 import { parseCoordinates, geocodeCity } from '../src/game/location.js';
 import { validMessage, escapeHtml } from '../src/game/protocol.js';
 import { renderRatio, AdaptiveQuality } from '../src/game/quality.js';
 import { disposeModel } from '../src/game/dispose.js';
-import { Group, Mesh, BoxGeometry, MeshBasicMaterial, Texture } from 'three';
+import { Box3, Group, Mesh, BoxGeometry, MeshBasicMaterial, Texture, Vector3 } from 'three';
 
 test('coordinates bypass network and geographic bounds are validated', async () => {
   assert.deepEqual(await geocodeCity(' -33.86, 151.21 '), {lat:-33.86,lon:151.21});
@@ -84,12 +84,13 @@ test('parachutist lands safely, walks, runs and relaunches', () => {
   assert.ok(pilot.heading > 0);
   pilot.land(100);
   assert.equal(pilot.state, 'grounded');
+  assert.ok(pilot.height > 100 && pilot.height < 100.5);
   const lat = pilot.lat;
   for (let i = 0; i < 120; i++) pilot.update(1 / 60, {roll:0,pitch:-1,throttle:1});
   assert.ok(pilot.lat > lat);
   assert.ok(pilot.kmh > 12);
   pilot.settleOnSurface(100);
-  assert.equal(pilot.height, 100);
+  assert.ok(pilot.height > 100 && pilot.height < 100.5);
   assert.equal(pilot.takeOff(100), true);
   for (let i = 0; i < 1200; i++) pilot.update(1 / 60, {roll:0,pitch:0,throttle:0});
   assert.equal(pilot.state, 'airborne');
@@ -110,7 +111,7 @@ test('terrain LOD changes keep a stationary parachutist grounded', () => {
   pilot.land(120);
   pilot.settleOnSurface(105);
   assert.equal(pilot.state, 'grounded');
-  assert.equal(pilot.height, 105);
+  assert.ok(pilot.height > 105 && pilot.height < 105.5);
 });
 
 test('S makes the parachutist descend faster while reducing horizontal speed', () => {
@@ -126,6 +127,17 @@ test('S makes the parachutist descend faster while reducing horizontal speed', (
   const before = descending.verticalSpeed;
   for (let i = 0; i < 60; i++) descending.update(1 / 60, {roll:0,pitch:1,throttle:0});
   assert.ok(descending.verticalSpeed > before);
+});
+
+test('procedural parachutist stays finite and bounded through flight and walking animation', () => {
+  const model = createParachutistModel();
+  for (let i = 0; i < 600; i++) updateParachutistModel(model, 'airborne', 10.5, 1 / 60);
+  for (let i = 0; i < 600; i++) updateParachutistModel(model, 'grounded', i < 300 ? 1.65 : 4.8, 1 / 60);
+  const size = new Box3().setFromObject(model).getSize(new Vector3());
+  assert.ok([size.x, size.y, size.z].every(Number.isFinite));
+  assert.ok(size.x > 8 && size.x < 11);
+  assert.ok(size.y > 1.5 && size.y < 10);
+  assert.ok(size.z < 5);
 });
 
 test('shared model resources are freed exactly once and detached', () => {
