@@ -13,7 +13,7 @@
 - Stabilne współrzędne przy biegunach i południku 180°, poprawiony model zakrętów i wygładzanie zależne od czasu.
 - Zwalnianie zasobów modeli i odrzucanie spóźnionych odpowiedzi ładowania.
 - Cienie i filtrowanie tekstur ustawiane podczas ładowania kafelka, bez ciągłego przechodzenia całej sceny.
-- Performance jako domyślny profil jakości; opcjonalny Ultra 4K z ostrzeżeniem o wysokich wymaganiach, adaptacją rozdzielczości i odczytem rzeczywistego bufora.
+- Jeden profil Adaptive high detail do 1440p, z adaptacją rozdzielczości i agresywnym dogrywaniem otoczenia po lądowaniu; usunięto niestabilny tryb Ultra 4K.
 - Spadochroniarz z animowanym modelem, sterowaniem czaszą, bezpiecznym lądowaniem na powierzchni fotogrametrii, chodzeniem, biegiem i ponownym startem.
 - Stabilna, lokalnie przeliczana geometria animowanej postaci bez artefaktów szkieletu; widok pierwszoosobowy z rękami i linkami przy maksymalnym zbliżeniu.
 - Wstępne doczytywanie dokładniejszych kafelków przed lądowaniem oraz profil szczegółów ulicznych po przyziemieniu.

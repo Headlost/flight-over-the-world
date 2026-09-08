@@ -15,11 +15,11 @@ test('coordinates bypass network and geographic bounds are validated', async () 
   await assert.rejects(geocodeCity('91, 0'), /Coordinates/);
   assert.throws(() => parseCoordinates('0, 181'));
 });
-test('Ultra targets 4K at 16:9 and respects hardware limits', () => {
-  assert.equal(renderRatio('ultra',1920,1080,1),2);
-  assert.equal(renderRatio('ultra',3840,2160,2),1);
-  assert.ok(3840 * renderRatio('ultra',3840,2160,2,2048) <= 2048);
-  assert.equal(renderRatio('performance',1920,1080,3),1);
+test('adaptive high detail stays within a 1440p and hardware budget', () => {
+  assert.ok(Math.abs(renderRatio('performance',1920,1080,3) - 4/3) < 0.001);
+  assert.ok(Math.abs(renderRatio('performance',3840,2160,2) - 2/3) < 0.001);
+  assert.ok(3840 * renderRatio('performance',3840,2160,2,2048) <= 2048);
+  assert.equal(renderRatio('ultra',1920,1080,1),1);
 });
 test('adaptive rendering recovers and stays bounded', () => {
   const q = new AdaptiveQuality();
@@ -76,7 +76,7 @@ test('faster aircraft have wider turns at the same bank', () => {
   assert.ok(slow.heading - Math.PI/2 > fast.heading - Math.PI/2);
 });
 
-test('parachutist lands safely, walks, runs and relaunches', () => {
+test('parachutist lands safely, walks at a constant brisk pace and relaunches gently', () => {
   const pilot = new ParachutistController(52, 16, 120, 0);
   for (let i = 0; i < 60; i++) pilot.update(1 / 60, {roll:0.5,pitch:-1,throttle:0});
   assert.equal(pilot.state, 'airborne');
@@ -88,13 +88,31 @@ test('parachutist lands safely, walks, runs and relaunches', () => {
   const lat = pilot.lat;
   for (let i = 0; i < 120; i++) pilot.update(1 / 60, {roll:0,pitch:-1,throttle:1});
   assert.ok(pilot.lat > lat);
-  assert.ok(pilot.kmh > 12);
+  assert.ok(pilot.kmh > 8.5 && pilot.kmh < 9.5);
+  const walkingSpeed = pilot.speed;
+  for (let i = 0; i < 120; i++) pilot.update(1 / 60, {roll:0,pitch:-1,throttle:0});
+  assert.ok(Math.abs(pilot.speed - walkingSpeed) < 0.01);
   pilot.settleOnSurface(100);
   assert.ok(pilot.height > 100 && pilot.height < 100.5);
   assert.equal(pilot.takeOff(100), true);
-  for (let i = 0; i < 1200; i++) pilot.update(1 / 60, {roll:0,pitch:0,throttle:0});
-  assert.equal(pilot.state, 'airborne');
-  assert.ok(pilot.height > 170);
+  for (let i = 0; i < 180; i++) pilot.update(1 / 60, {roll:0,pitch:0,throttle:0});
+  assert.ok(pilot.height > 104 && pilot.height < 113);
+});
+
+test('R-style rocket launch climbs high while S can cancel a gentle takeoff', () => {
+  const gentle = new ParachutistController(52, 16, 100, 0);
+  gentle.land(100);
+  assert.equal(gentle.takeOff(100, 'gentle'), true);
+  for (let i = 0; i < 60; i++) gentle.update(1 / 60, {roll:0,pitch:1,throttle:0});
+  assert.equal(gentle.state, 'airborne');
+  assert.ok(gentle.verticalSpeed < 0);
+
+  const rocket = new ParachutistController(52, 16, 100, 0);
+  rocket.land(100);
+  assert.equal(rocket.takeOff(100, 'rocket'), true);
+  for (let i = 0; i < 1200; i++) rocket.update(1 / 60, {roll:0,pitch:0,throttle:0});
+  assert.equal(rocket.state, 'airborne');
+  assert.ok(rocket.height > 170);
 });
 
 test('parachutist leaves a roof as flight instead of crashing', () => {
@@ -132,6 +150,8 @@ test('S makes the parachutist descend faster while reducing horizontal speed', (
 test('procedural parachutist stays finite and bounded through flight and walking animation', () => {
   const model = createParachutistModel();
   for (let i = 0; i < 600; i++) updateParachutistModel(model, 'airborne', 10.5, 1 / 60);
+  const legs = model.userData.parachutist.character.legs;
+  assert.ok(legs.every(leg => leg.upper.rotation.x > 0 && leg.lower.rotation.x < 0));
   for (let i = 0; i < 600; i++) updateParachutistModel(model, 'grounded', i < 300 ? 1.65 : 4.8, 1 / 60);
   const size = new Box3().setFromObject(model).getSize(new Vector3());
   assert.ok([size.x, size.y, size.z].every(Number.isFinite));

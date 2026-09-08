@@ -26,4 +26,4 @@ npm run build
 
 `npm run dev` uruchamia serwer deweloperski. `npm run preview` sprawdza zbudowany `dist`. Publiczna wersja jest wdrażana z repozytorium, nie z tego serwera.
 
-Testy przeglądarkowe używają osobnej, fałszywej konfiguracji terenu, aby nie zużywać prywatnych limitów. Kafelki i wyszukiwanie są zastępowane kontrolowanymi odpowiedziami. Sprawdzane są rzeczywiste zdarzenia Leaflet: kliknięcie mapy, przeciąganie pinezki, wpisanie współrzędnych oraz wybór wyniku wyszukiwania. Test bufora 4K nie jest benchmarkiem fotogrametrii.
+Testy przeglądarkowe używają osobnej, fałszywej konfiguracji terenu, aby nie zużywać prywatnych limitów. Kafelki i wyszukiwanie są zastępowane kontrolowanymi odpowiedziami. Sprawdzane są rzeczywiste zdarzenia Leaflet: kliknięcie mapy, przeciąganie pinezki, wpisanie współrzędnych oraz wybór wyniku wyszukiwania. Test bufora obrazu nie jest benchmarkiem fotogrametrii.

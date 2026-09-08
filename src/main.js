@@ -65,6 +65,7 @@ import {
 } from "./game/explosion.js";
 import { updateEngineSound, engineDebug } from "./game/engineSound.js";
 import { updateMusic, primeMusic, musicDebug } from "./game/music.js";
+import { createStreetWalk, loadGoogleMaps, streetLatLon } from "./game/streetview.js";
 
 // rakieta stoi pionowo (+Y) — połóż ją nosem do przodu (-Z, konwencja lotu)
 function prepareRocket(model) {
@@ -97,26 +98,31 @@ function createFirstPersonArms() {
     const brakeLine = new Mesh(new CylinderGeometry(0.009, 0.009, 1.3, 5), strap);
     brakeLine.position.set(side * 0.31, 0.11, -1.12);
     rig.add(upper, forearm, hand, brakeLine);
-    arms.push({ forearm, hand });
+    arms.push({ forearm, hand, side });
     lines.push(brakeLine);
   }
   rig.userData.arms = arms;
   rig.userData.lines = lines;
+  rig.userData.walkPhase = 0;
   rig.scale.setScalar(0.68);
   rig.position.y = -0.12;
   rig.visible = false;
   return rig;
 }
 
-function updateFirstPersonArms(rig, controls, dt, state) {
+function updateFirstPersonArms(rig, controls, dt, state, speed = 0) {
   if (!rig?.userData?.arms) return;
   const brake = Math.max(0, controls.pitch);
+  const walking = state === "grounded" && Math.abs(speed) > 0.15;
+  if (walking) rig.userData.walkPhase += Math.min(dt, 0.05) * 7.4 * Math.sign(speed || 1);
   for (const line of rig.userData.lines || []) line.visible = state !== "grounded";
   for (const [index, arm] of rig.userData.arms.entries()) {
     const steering = controls.roll * (index === 0 ? -1 : 1);
-    const target = -1.24 + brake * 0.32 + Math.max(0, steering) * 0.24;
+    const walkSwing = walking ? Math.sin(rig.userData.walkPhase) * arm.side * 0.42 : 0;
+    const target = state === "grounded" ? -1.04 + walkSwing : -1.24 + brake * 0.32 + Math.max(0, steering) * 0.24;
     arm.forearm.rotation.x += (target - arm.forearm.rotation.x) * Math.min(1, dt * 9);
-    arm.hand.position.y = -0.48 - brake * 0.18 - Math.max(0, steering) * 0.12;
+    arm.hand.position.y = state === "grounded" ? -0.43 + Math.abs(walkSwing) * 0.08 : -0.48 - brake * 0.18 - Math.max(0, steering) * 0.12;
+    arm.hand.position.z = state === "grounded" ? -1.02 - walkSwing * 0.2 : -1.12;
   }
 }
 import {
@@ -187,6 +193,7 @@ const GUESS_SCOPES = {
 };
 
 const ION_KEY = settings.ion;
+const GOOGLE_MAPS_KEY = import.meta.env.VITE_GOOGLE_MAPS_KEY || "";
 const TERRAIN_ALT = 120; // przybliżona wysokość elipsoidalna nizin
 
 // Access depends on the provider account, enabled asset, region and quotas.
@@ -258,7 +265,7 @@ const GUESS_TIME = 60; // 1 min na rozpoznanie terenu
 const HOME_CAPTURE_M = 600;
 const HOME_BEACON_M = 1000;
 
-let camera, detailCamera, scene, renderer, tiles, sun, sky, firstPersonRig;
+let camera, detailCameras, scene, renderer, tiles, sun, sky, firstPersonRig;
 let planeMesh, plane, beacon;
 let groundAlt = TERRAIN_ALT;
 let crashed = false;
@@ -300,8 +307,10 @@ let loadError = null;
 let frameCount = 0;
 let firstPersonActive = false;
 let terrainDetailMode = "normal";
-let detailCameraRegistered = false;
+let detailCameraRegistered = 0;
 let terrainDetailChangedAt = 0;
+let streetWalk = null;
+let streetModeActive = false;
 let selectedPlane = "pa28";
 let menuOpen = true;
 let paused = false;
@@ -460,6 +469,14 @@ const el = {
   fatalText: document.getElementById("fatal-text"),
   fatalOk: document.getElementById("fatal-ok"),
   crashNote: document.getElementById("crash-note"),
+  streetMode: document.getElementById("street-mode"),
+  streetView: document.getElementById("streetview"),
+  streetModeStatus: document.getElementById("street-mode-status"),
+  streetReturn: document.getElementById("street-return"),
+  streetPrompt: document.getElementById("street-prompt"),
+  streetPromptCopy: document.getElementById("street-prompt-copy"),
+  streetPromptNote: document.getElementById("street-prompt-note"),
+  streetEnter: document.getElementById("street-enter"),
 };
 
 // karuzela pojazdów — jeden duży podgląd, strzałki w bok
@@ -1624,7 +1641,9 @@ function init() {
   scene.add(sun.target);
 
   camera = new PerspectiveCamera(70, innerWidth / innerHeight, 1, 2e6);
-  detailCamera = new PerspectiveCamera(92, 16 / 9, 0.1, 2200);
+  // Three hidden cameras cover the directions outside the player's current
+  // view. Together with the render camera they request a full 360° ring.
+  detailCameras = Array.from({ length: 3 }, () => new PerspectiveCamera(88, 16 / 9, 0.1, 1800));
   firstPersonRig = createFirstPersonArms();
   camera.add(firstPersonRig);
   scene.add(camera);
@@ -1650,6 +1669,7 @@ function init() {
   const draco = new DRACOLoader();
   draco.setDecoderPath("https://www.gstatic.com/draco/versioned/decoders/1.5.7/");
   tiles.registerPlugin(new GLTFExtensionsPlugin({ dracoLoader: draco }));
+  tiles.parseQueue.maxJobs = isMobile ? 3 : 8;
   tiles.group.rotation.x = -Math.PI / 2;
   tiles.group.visible = false;
   scene.add(tiles.group);
@@ -1657,7 +1677,7 @@ function init() {
   tiles.setCamera(camera);
   applyQuality();
   tiles.addEventListener('load-model', ({ scene: model }) => {
-    const anisotropy = Math.min(8, renderer.capabilities.getMaxAnisotropy());
+    const anisotropy = Math.min(16, renderer.capabilities.getMaxAnisotropy());
     model.traverse(object => {
       if (!object.isMesh) return;
       object.castShadow = true; object.receiveShadow = true;
@@ -2285,7 +2305,13 @@ el.gmRetry.addEventListener("click", () => {
 });
 
 window.addEventListener("keydown", (e) => {
+  if (streetModeActive && (e.key === "Escape" || e.key === " ")) {
+    e.preventDefault();
+    leaveStreetView();
+    return;
+  }
   if (e.key === "Escape") {
+    if (el.streetPrompt?.open) return;
     if (!menuOpen && !guessOpen) setPaused(!paused);
     return;
   }
@@ -2298,7 +2324,8 @@ window.addEventListener("keydown", (e) => {
   if (menuOpen || paused || guessOpen) return;
   if (["arrowup","arrowdown","arrowleft","arrowright"," ","control"].includes(k)) e.preventDefault();
   if (k === "c" && !e.repeat) { orbit.yaw = 0; orbit.pitch = 0.25; orbit.zoom = 1; }
-  if (k === " " && !e.repeat) tryParachutistRelaunch();
+  if (k === " " && !e.repeat) tryParachutistLaunch("gentle");
+  if (k === "r" && !e.repeat && !crashed && !finished) tryParachutistLaunch("rocket");
   keys.add(k);
   if (k === "r" && (crashed || finished)) restartMode();
 });
@@ -2384,20 +2411,20 @@ if (el.stick) {
 bindHold(el.touchBoost, () => { touch.boost = true; }, () => { touch.boost = false; });
 bindHold(el.touchBrake, () => { touch.brake = true; }, () => { touch.brake = false; });
 bindHold(el.touchTalk, () => startTalk(), () => stopTalk());
-el.touchAction?.addEventListener("click", tryParachutistRelaunch);
+el.touchAction?.addEventListener("click", () => tryParachutistLaunch("gentle"));
 el.touchPause?.addEventListener("click", () => setPaused(true));
 el.stick?.addEventListener("touchmove", (e) => e.preventDefault(), { passive: false });
 
 function syncTouchUi() {
   if (!el.touch) return;
-  const show = !menuOpen && !paused && !guessOpen && !crashed && !finished;
+  const show = !menuOpen && !paused && !guessOpen && !crashed && !finished && !streetModeActive;
   el.touch.classList.toggle("hidden", !show);
   el.touch.classList.toggle("show", show);
   el.touch.classList.toggle("talk", !!(mp.active && mp.net));
   if (el.touchAction) {
     const canLaunch = selectedPlane === "parachutist" && plane?.state === "grounded";
     el.touchAction.disabled = !canLaunch;
-    el.touchAction.textContent = canLaunch ? "Relaunch" : plane?.state === "launching" ? "Launching…" : "Land to relaunch";
+    el.touchAction.textContent = canLaunch ? "Gentle takeoff" : plane?.state === "launching" ? "Taking off…" : "Land to take off";
   }
   if (!show) {
     resetStick();
@@ -2406,9 +2433,9 @@ function syncTouchUi() {
   }
 }
 
-function tryParachutistRelaunch() {
+function tryParachutistLaunch(mode = "gentle") {
   if (selectedPlane !== "parachutist" || !plane || menuOpen || paused || guessOpen) return;
-  if (plane.takeOff?.(groundAlt)) {
+  if (plane.takeOff?.(groundAlt, mode)) {
     setParachutistState(planeMesh, plane.state, plane.speed);
     camInit = false;
   }
@@ -2456,17 +2483,94 @@ let camInit = false;
 const adaptiveQuality = new AdaptiveQuality();
 const flightStatus = document.createElement('div'); flightStatus.id = 'flight-status'; document.body.append(flightStatus);
 const movementStatus = document.createElement('div'); movementStatus.id = 'movement-status'; movementStatus.hidden = true; document.body.append(movementStatus);
-const streetViewLink = document.createElement('a');
+const streetViewLink = document.createElement('button');
 streetViewLink.id = 'street-view-link';
-streetViewLink.target = '_blank';
-streetViewLink.rel = 'noopener noreferrer';
-streetViewLink.textContent = 'Open actual Street View';
+streetViewLink.type = 'button';
+streetViewLink.textContent = 'Enter Street View';
 streetViewLink.hidden = true;
 document.body.append(streetViewLink);
 const credits = document.createElement('div'); credits.id = 'map-credits'; document.body.append(credits);
 const settingsUI = setupSettings(() => { adaptiveQuality.reset(); applyQuality(); }, () => { if (!menuOpen) setPaused(true); });
 setupLocationPicker(() => { if (!menuOpen) setPaused(true); });
 const orbit = { yaw:0, pitch:0.25, zoom:1, dragging:false };
+
+function streetViewUrl() {
+  const viewpoint = `${plane.latDeg.toFixed(6)},${plane.lonDeg.toFixed(6)}`;
+  return `https://www.google.com/maps/@?api=1&map_action=pano&viewpoint=${encodeURIComponent(viewpoint)}&heading=${Math.round(plane.headingDeg)}&pitch=0&fov=80`;
+}
+
+function showStreetPrompt() {
+  if (!plane || plane.state !== "grounded" || streetModeActive) return;
+  el.streetPromptCopy.textContent = "The game will look for imagery on the closest available street. On a roof or a building, the panorama may begin beside the building instead of at the exact landing point.";
+  el.streetPromptNote.textContent = GOOGLE_MAPS_KEY
+    ? "Your position in Street View will be transferred back to the game when you leave."
+    : "Integrated Street View is unavailable on this deployment, so Google Maps will open separately. Return to this game tab to continue; movement in Google Maps cannot be transferred back without the site Street View service.";
+  el.streetEnter.textContent = GOOGLE_MAPS_KEY ? "Enter Street View" : "Open nearest Street View";
+  if (!el.streetPrompt.open) el.streetPrompt.showModal();
+}
+
+async function enterStreetView() {
+  if (!plane || plane.state !== "grounded") return;
+  if (!GOOGLE_MAPS_KEY) {
+    window.open(streetViewUrl(), "fotw-street-view", "noopener,noreferrer");
+    el.streetPrompt.close();
+    return;
+  }
+  const origin = { lat: plane.latDeg, lon: plane.lonDeg, name: "landing point" };
+  el.streetPrompt.close();
+  streetModeActive = true;
+  keys.clear();
+  el.streetMode.classList.add("open");
+  el.streetMode.setAttribute("aria-hidden", "false");
+  el.streetModeStatus.textContent = "Finding the closest Street View panorama…";
+  try {
+    const maps = await loadGoogleMaps(GOOGLE_MAPS_KEY);
+    if (!streetModeActive) return;
+    streetWalk = await createStreetWalk(el.streetView, maps, origin);
+    if (!streetModeActive) { streetWalk.destroy?.(); streetWalk = null; return; }
+    const start = streetLatLon(streetWalk);
+    const offset = Math.round(distanceM(origin.lat, origin.lon, start.lat, start.lon));
+    el.streetModeStatus.textContent = offset > 20
+      ? `Street View was unavailable at the landing point. Started on the nearest street, ${offset} m away. Click and drag once, then use W/A/S/D.`
+      : "Click and drag once, then use W/S to move and A/D to turn.";
+  } catch (error) {
+    streetWalk?.destroy?.();
+    streetWalk = null;
+    streetModeActive = false;
+    el.streetMode.classList.remove("open");
+    el.streetMode.setAttribute("aria-hidden", "true");
+    el.streetPromptCopy.textContent = error?.message || "Street View is unavailable here.";
+    el.streetPromptNote.textContent = "You can keep walking in the 3D world or try again after moving closer to a street.";
+    el.streetEnter.textContent = "Try again";
+    if (!el.streetPrompt.open) el.streetPrompt.showModal();
+  }
+}
+
+function leaveStreetView() {
+  if (!streetModeActive) return;
+  if (streetWalk && plane) {
+    const position = streetLatLon(streetWalk);
+    const pov = streetWalk.pano.getPov();
+    plane.lat = position.lat * MathUtils.DEG2RAD;
+    plane.lon = position.lon * MathUtils.DEG2RAD;
+    plane.heading = MathUtils.euclideanModulo((pov?.heading || 0) * MathUtils.DEG2RAD, Math.PI * 2);
+    plane.speed = 0;
+    plane.previousGroundPose = null;
+    camInit = false;
+  }
+  streetWalk?.destroy?.();
+  streetWalk = null;
+  streetModeActive = false;
+  el.streetMode.classList.remove("open");
+  el.streetMode.setAttribute("aria-hidden", "true");
+  el.streetView.replaceChildren();
+  keys.clear();
+  renderer?.domElement?.focus?.();
+}
+
+streetViewLink.addEventListener("click", showStreetPrompt);
+el.streetEnter?.addEventListener("click", enterStreetView);
+el.streetReturn?.addEventListener("click", leaveStreetView);
 function bindOrbit(canvas) {
   canvas.addEventListener('contextmenu', e => e.preventDefault());
   canvas.addEventListener('pointerdown', e => { if (e.button === 2) { orbit.dragging = true; canvas.setPointerCapture(e.pointerId); } });
@@ -2493,7 +2597,7 @@ function setTerrainDetail(modeName) {
   const q = QUALITY[settings.quality];
   const landing = modeName === "landing";
   const street = modeName === "street";
-  tiles.errorTarget = street ? Math.min(q.error, isMobile ? 5 : 3) : landing ? Math.min(q.error, isMobile ? 7 : 4) : q.error;
+  tiles.errorTarget = street ? Math.min(q.error, isMobile ? 4 : 2.25) : landing ? Math.min(q.error, isMobile ? 6 : 3.5) : q.error;
   tiles.lruCache.maxSize = street ? (isMobile ? 3600 : 7000) : landing ? (isMobile ? 2800 : 5200) : 2400;
   tiles.lruCache.minSize = Math.round(tiles.lruCache.maxSize * 0.58);
   const bytes = street ? Math.max(q.bytes, isMobile ? 420e6 : 1000e6) : landing ? Math.max(q.bytes, isMobile ? 360e6 : 720e6) : q.bytes;
@@ -2504,34 +2608,42 @@ function setTerrainDetail(modeName) {
 }
 
 function updateDetailCamera() {
-  if (!tiles || !detailCamera || !plane) return;
+  if (!tiles || !detailCameras?.length || !plane) return;
   const modeAge = performance.now() - terrainDetailChangedAt;
-  const ultra = settings.quality === "ultra";
-  const streetSweep = terrainDetailMode === "street" && ultra && modeAge >= 6000;
+  const streetSweep = terrainDetailMode === "street";
   const active = terrainDetailMode === "landing" || streetSweep;
   if (terrainDetailMode === "street") {
     const q = QUALITY[settings.quality];
-    tiles.errorTarget = Math.min(q.error, isMobile ? 4 : ultra && modeAge >= 6000 ? 1.5 : 3);
+    tiles.errorTarget = Math.min(q.error, isMobile ? 4 : modeAge >= 5000 ? 1.5 : 2.25);
   }
   if (!active) {
-    if (detailCameraRegistered) {
-      tiles.deleteCamera(detailCamera);
-      detailCameraRegistered = false;
+    while (detailCameraRegistered > 0) {
+      detailCameraRegistered -= 1;
+      tiles.deleteCamera(detailCameras[detailCameraRegistered]);
     }
     return;
   }
-  if (!detailCameraRegistered) {
-    tiles.setCamera(detailCamera);
-    detailCameraRegistered = true;
+  const wanted = streetSweep ? (isMobile ? 2 : 3) : 1;
+  while (detailCameraRegistered < wanted) {
+    tiles.setCamera(detailCameras[detailCameraRegistered]);
+    detailCameraRegistered += 1;
   }
-  const quarterTurn = streetSweep ? Math.floor(modeAge / 5000) % 4 : 0;
-  const detailHeading = plane.heading + quarterTurn * Math.PI / 2;
+  while (detailCameraRegistered > wanted) {
+    detailCameraRegistered -= 1;
+    tiles.deleteCamera(detailCameras[detailCameraRegistered]);
+  }
   const detailHeight = Math.max(-500, groundAlt) + 1.75;
-  const matrix = frameAt(plane.lat, plane.lon, detailHeight, detailHeading, -0.08, 0);
-  matrix.decompose(detailCamera.position, detailCamera.quaternion, detailCamera.scale);
-  detailCamera.updateMatrixWorld(true);
-  const width = isMobile ? 480 : terrainDetailMode === "street" ? 800 : 640;
-  tiles.setResolution(detailCamera, width, Math.round(width * 9 / 16));
+  const width = isMobile ? 480 : streetSweep ? 800 : 720;
+  for (let i = 0; i < detailCameraRegistered; i++) {
+    const detailCamera = detailCameras[i];
+    // The visible camera covers the current direction; these cameras start at
+    // 90° and fill the remaining ring in parallel.
+    const detailHeading = plane.heading + (i + 1) * Math.PI / 2;
+    const matrix = frameAt(plane.lat, plane.lon, detailHeight, detailHeading, -0.06, 0);
+    matrix.decompose(detailCamera.position, detailCamera.quaternion, detailCamera.scale);
+    detailCamera.updateMatrixWorld(true);
+    tiles.setResolution(detailCamera, width, Math.round(width * 9 / 16));
+  }
 }
 init();
 animate();
@@ -2580,7 +2692,7 @@ function tickFrame() {
   frameCount += 1;
   scene.updateMatrixWorld();
 
-  const flying = !menuOpen && !paused && !guessOpen && !crashed && !finished;
+  const flying = !menuOpen && !paused && !guessOpen && !crashed && !finished && !streetModeActive;
 
   // sterowanie lotnicze: W / góra = drążek od siebie = nos w dół
   const keyRoll =
@@ -2722,7 +2834,7 @@ function tickFrame() {
   }
   if (firstPersonRig) {
     firstPersonRig.visible = firstPerson;
-    updateFirstPersonArms(firstPersonRig, ctrl, dt, plane.state);
+    updateFirstPersonArms(firstPersonRig, ctrl, dt, plane.state, plane.speed);
   }
   setParachutistFirstPerson(planeMesh, firstPerson);
   const cameraProfile = selectedPlane === "parachutist" && plane.state === "grounded" ? [0, 2.4, 5.5] : camOffset;
@@ -2820,7 +2932,7 @@ function tickFrame() {
       } else if (selectedPlane === "parachutist") {
         plane.setGroundClearance?.(plane.height - gh);
         if (plane.state === "grounded") plane.settleOnSurface(gh);
-        else if (plane.state === "airborne" && plane.verticalSpeed <= 0 && plane.height <= gh + 0.65) plane.land(gh);
+        else if (plane.state !== "grounded" && plane.verticalSpeed <= 0 && plane.height <= gh + 0.65) plane.land(gh);
       }
     }
   }
@@ -2917,10 +3029,9 @@ function tickFrame() {
     const canvas = renderer.domElement;
     flightStatus.hidden = menuOpen;
     const detailProgress = Math.round((tiles.loadProgress || 0) * 100);
-    const streetAge = performance.now() - terrainDetailChangedAt;
     const detailLabel = terrainDetailMode === 'street' && tiles.isLoading
-      ? settings.quality === 'ultra' && streetAge >= 6000 ? ` · Enhancing surroundings ${detailProgress}%…` : ` · Loading current street view ${detailProgress}%…`
-      : terrainDetailMode === 'street' ? ' · Street detail ready' : tiles.isLoading ? ' · Streaming terrain…' : '';
+      ? ` · Loading 360° ground detail ${detailProgress}%…`
+      : terrainDetailMode === 'street' ? ' · 360° ground detail ready' : tiles.isLoading ? ' · Streaming terrain…' : '';
     flightStatus.textContent = loadError || QUALITY[settings.quality].label + ' · ' + canvas.width + ' × ' + canvas.height + ' · ' + Math.round(1 / Math.max(rawDt,0.001)) + ' FPS' + detailLabel;
     renderAttributions(credits, tiles.getAttributions([]));
     if (tiles.visibleTiles.size) {
@@ -3001,19 +3112,15 @@ function updateHud(agl) {
   if (selectedPlane === "parachutist" && !menuOpen) {
     movementStatus.hidden = false;
     movementStatus.textContent = plane.state === "grounded"
-      ? "ON FOOT · W/S walk · A/D turn · Shift run · zoom in for first-person · open actual Street View below · Space relaunch"
+      ? "ON FOOT · W/S walk · A/D turn · zoom in for first-person · Street View below · Space gentle takeoff · R rocket launch"
       : plane.state === "launching"
-        ? "RELAUNCHING · steer with A/D"
+        ? `${plane.launchMode === "rocket" ? "ROCKET LAUNCH" : "GENTLE TAKEOFF"} · steer with A/D · S cancels climb and descends`
         : "CANOPY · A/D steer · S descend + slow · W flatten · zoom in for first-person";
   } else {
     movementStatus.hidden = true;
   }
   const showStreetView = selectedPlane === "parachutist" && !menuOpen && plane.state === "grounded";
   streetViewLink.hidden = !showStreetView;
-  if (showStreetView) {
-    const viewpoint = `${plane.latDeg.toFixed(6)},${plane.lonDeg.toFixed(6)}`;
-    streetViewLink.href = `https://www.google.com/maps/@?api=1&map_action=pano&viewpoint=${encodeURIComponent(viewpoint)}&heading=${Math.round(plane.headingDeg)}&pitch=0&fov=80`;
-  }
 
   if (timerActive || mode !== "free") {
     const tsec = Math.max(0, Math.ceil(timeLeft));

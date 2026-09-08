@@ -21,21 +21,20 @@ export function setupSettings(onQualityChange, onOpen) {
   dialog.setAttribute('aria-labelledby', 'settings-title');
   dialog.innerHTML = `<form method="dialog">
     <div class="dialog-heading"><h2 id="settings-title">Flight settings</h2><button value="close" aria-label="Close settings">×</button></div>
-    <p>Ready to fly online. Choose the picture quality that suits your device.</p>
-    <label>Rendering quality<select id="quality">${Object.entries(QUALITY).map(([k,q]) => `<option value="${k}">${q.label}</option>`).join('')}</select></label>
+    <p>Ready to fly online. Rendering uses one high-detail profile and prioritizes the area around you after landing.</p>
+    <p class="settings-note"><strong>${QUALITY.performance.label}</strong> · up to 2560 × 1440, with extra terrain detail near the ground.</p>
     <label class="check"><input id="adaptive" type="checkbox"> Adapt resolution to keep flight smooth</label>
-    <p class="settings-note" id="quality-warning">Performance is the recommended default. Ultra 4K targets 3840 × 2160 and is very demanding, so it may lag even on fast devices. Adaptive mode may lower resolution.</p>
+    <p class="settings-note" id="quality-warning">Adaptive resolution protects frame rate while nearby map tiles continue loading at high detail.</p>
     <button value="close">Done</button>
   </form>`;
   document.body.append(dialog);
-  const q = dialog.querySelector('#quality'); q.value = settings.quality;
   const a = dialog.querySelector('#adaptive'); a.checked = settings.adaptive;
   const change = () => {
-    settings.quality = q.value; settings.adaptive = a.checked;
-    try { localStorage.setItem('fotw-settings', JSON.stringify({ quality: q.value, adaptive: a.checked })); } catch { /* optional */ }
+    settings.quality = 'performance'; settings.adaptive = a.checked;
+    try { localStorage.setItem('fotw-settings', JSON.stringify({ quality: 'performance', adaptive: a.checked })); } catch { /* optional */ }
     onQualityChange();
   };
-  q.addEventListener('change', change); a.addEventListener('change', change);
+  a.addEventListener('change', change);
   const button = document.createElement('button');
   button.id = 'settings-toggle'; button.type = 'button'; button.textContent = '⚙ Settings';
   const open = () => { onOpen(); if (!dialog.open) dialog.showModal(); };

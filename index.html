@@ -126,8 +126,8 @@
           <button id="start-btn" type="button">Start</button>
         </div>
         <p id="menu-error"></p>
-          <p class="hint hint-desk"><kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd> steer · parachutist: <kbd>S</kbd> descend and slow · <kbd>Shift</kbd> faster/run · <kbd>Ctrl</kbd> slower · <kbd>Space</kbd> relaunch · <kbd>Esc</kbd> pause<br>Right-drag to look around · scroll fully in for first-person · after landing, open actual Street View without an API key · <kbd>C</kbd> reset camera</p>
-          <p class="hint hint-touch">Drag the stick to steer · hold Faster / Slower · use Relaunch after landing</p>
+          <p class="hint hint-desk"><kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd> steer · parachutist: <kbd>S</kbd> descend and slow · <kbd>Space</kbd> gentle takeoff · <kbd>R</kbd> rocket launch · <kbd>Esc</kbd> pause<br>Right-drag to look around · scroll fully in for first-person · after landing, use Street View · <kbd>C</kbd> reset camera</p>
+          <p class="hint hint-touch">Drag the stick to steer · use Gentle takeoff after landing</p>
       </div>
     </div>
 
@@ -195,10 +195,32 @@
       <div class="touch-btns">
         <button id="touch-boost" type="button">Faster</button>
         <button id="touch-brake" type="button">Slower</button>
-        <button id="touch-action" type="button">Relaunch</button>
+        <button id="touch-action" type="button">Gentle takeoff</button>
         <button id="touch-talk" type="button">Talk</button>
       </div>
     </div>
+
+    <section id="street-mode" aria-label="Street View" aria-hidden="true">
+      <div id="streetview"></div>
+      <div class="street-mode-hud">
+        <strong id="street-mode-title">Street View</strong>
+        <span id="street-mode-status">Click and drag once, then use W/A/S/D to move and turn.</span>
+        <button id="street-return" type="button">Return to flight <kbd>Esc</kbd> / <kbd>Space</kbd></button>
+      </div>
+    </section>
+
+    <dialog id="street-prompt" class="flight-dialog street-prompt" aria-labelledby="street-prompt-title">
+      <form method="dialog">
+        <div class="dialog-heading"><h2 id="street-prompt-title">Enter Street View?</h2><button value="cancel" aria-label="Close">×</button></div>
+        <p id="street-prompt-copy">Street View will use the closest available street to this landing point.</p>
+        <p class="settings-note"><strong>Controls:</strong> after entering, click and drag the view at least once. Then use W/S to move and A/D to turn. Press Escape or Space to return to the flight.</p>
+        <p id="street-prompt-note" class="settings-note"></p>
+        <div class="street-prompt-actions">
+          <button id="street-enter" value="enter" type="button">Enter Street View</button>
+          <button value="cancel" class="ghost">Stay in flight</button>
+        </div>
+      </form>
+    </dialog>
 
     <script type="module" src="/src/main.js"></script>
   </body>

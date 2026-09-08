@@ -11,16 +11,16 @@ async function openPicker(page) {
   await expect(page.locator('#pin-status')).toContainText('Click the map');
 }
 
-test('online launcher has no credential form; quality persists', async ({page}) => {
+test('online launcher has no credential form; adaptive rendering persists', async ({page}) => {
+  test.setTimeout(60000);
   const errors=[]; page.on('pageerror', error => errors.push(error.message));
   await page.goto('/');
   await expect(page.getByRole('button',{name:'Single player',exact:true})).toBeVisible();
   await expect(page.locator('dialog[open]')).toHaveCount(0);
   await expect(page.locator('input[type=password]')).toHaveCount(0);
   await page.locator('#settings-toggle').click();
-  await expect(page.locator('#quality option')).toHaveCount(2);
-  await expect(page.locator('#quality option[value=balanced]')).toHaveCount(0);
-  await page.locator('#quality').selectOption('ultra');
+  await expect(page.locator('#quality')).toHaveCount(0);
+  await expect(page.locator('#quality-warning')).toContainText('nearby map tiles');
   await page.locator('#adaptive').uncheck();
   await page.getByRole('button',{name:'Done',exact:true}).click();
   await openPicker(page);
@@ -30,7 +30,6 @@ test('online launcher has no credential form; quality persists', async ({page}) 
   await expect(page.locator('#city-input')).toHaveValue('48.858400, 2.294500');
   await page.reload();
   await page.locator('#settings-toggle').click();
-  await expect(page.locator('#quality')).toHaveValue('ultra');
   await expect(page.locator('#adaptive')).not.toBeChecked();
   expect(errors).toEqual([]);
 });
@@ -55,7 +54,7 @@ test('invalid coordinates show an actionable error', async ({page}) => {
   await expect(page.locator('#pin-use')).toBeDisabled();
 });
 
-test('renderer switches to 4K and survives resize', async ({page}) => {
+test('renderer uses the adaptive 1440p budget and survives resize', async ({page}) => {
   test.setTimeout(60000);
   const errors=[]; page.on('pageerror', error => errors.push(error.message));
   await page.setViewportSize({width:1280,height:720});
@@ -63,11 +62,12 @@ test('renderer switches to 4K and survives resize', async ({page}) => {
   await page.goto('/');
   await expect(page.locator('#game-canvas')).toBeVisible();
   await expect.poll(() => page.evaluate(() => window.__dbg?.frame || 0)).toBeGreaterThan(2);
+  await expect.poll(() => page.locator('#game-canvas').evaluate(canvas => [canvas.width,canvas.height])).toEqual([1280,720]);
   await page.locator('#settings-toggle').click();
-  await page.locator('#quality').selectOption('ultra');
-  await expect.poll(() => page.locator('#game-canvas').evaluate(canvas => [canvas.width,canvas.height])).toEqual([3840,2160]);
+  await page.locator('#adaptive').uncheck();
+  await expect.poll(() => page.locator('#game-canvas').evaluate(canvas => [canvas.width,canvas.height])).toEqual([1280,720]);
   await page.setViewportSize({width:900,height:900});
-  await expect.poll(() => page.locator('#game-canvas').evaluate(canvas => Math.abs(canvas.width * canvas.height - 3840*2160))).toBeLessThan(6000);
+  await expect.poll(() => page.locator('#game-canvas').evaluate(canvas => [canvas.width,canvas.height])).toEqual([900,900]);
   expect(errors).toEqual([]);
 });
 

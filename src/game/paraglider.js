@@ -13,9 +13,12 @@ import {
 } from "three";
 
 const R_EARTH = 6378137;
-const WALK_SPEED = 1.65;
-const RUN_SPEED = 4.8;
+// A brisk, predictable walking pace. Keeping it constant makes precise movement
+// on roofs and narrow streets easier than switching between walk and run.
+const WALK_SPEED = 2.5;
 const GROUND_CLEARANCE = 0.32;
+const GENTLE_LAUNCH_HEIGHT = 12;
+const ROCKET_LAUNCH_HEIGHT = 80;
 
 function createCanopy() {
   const group = new Group();
@@ -158,7 +161,7 @@ export function setParachutistState(root, state, speed = 0) {
   if (!rig) return;
   rig.canopy.visible = state !== "grounded";
   rig.active = state === "grounded"
-    ? Math.abs(speed) > 3 ? "run" : Math.abs(speed) > 0.15 ? "walk" : "idle"
+    ? Math.abs(speed) > 0.15 ? "walk" : "idle"
     : "airborne";
 }
 
@@ -173,23 +176,25 @@ export function updateParachutistModel(root, state, speed, dt) {
   const model = rig.character;
   const step = Math.min(1, Math.max(0, dt) * 10);
   const moving = state === "grounded" && Math.abs(speed) > 0.15;
-  const run = Math.abs(speed) > 3;
-  if (moving) model.phase += Math.min(0.05, dt) * (run ? 10.5 : 6.2) * Math.sign(speed || 1);
+  if (moving) model.phase += Math.min(0.05, dt) * 7.4 * Math.sign(speed || 1);
   const gait = moving ? Math.sin(model.phase) : 0;
-  const stride = run ? 0.8 : 0.52;
+  const armStride = 0.72;
+  const legStride = 0.28;
 
   model.body.position.y = approach(model.body.position.y, state === "grounded" ? 0.92 + Math.abs(Math.sin(model.phase * 2)) * (moving ? 0.035 : 0) : 0.82, step);
   model.body.rotation.x = approach(model.body.rotation.x, state === "grounded" ? 0 : -0.14, step);
   for (const arm of model.arms) {
-    const groundSwing = gait * stride * 0.58 * arm.side;
+    const groundSwing = gait * armStride * arm.side;
     arm.upper.rotation.x = approach(arm.upper.rotation.x, state === "grounded" ? groundSwing : 0.78, step);
     arm.upper.rotation.z = approach(arm.upper.rotation.z, state === "grounded" ? -arm.side * 0.1 : -arm.side * 0.42, step);
     arm.lower.rotation.x = approach(arm.lower.rotation.x, state === "grounded" ? -Math.max(0, -groundSwing) * 0.35 : -0.58, step);
   }
   for (const leg of model.legs) {
-    const legSwing = gait * stride * leg.side;
-    leg.upper.rotation.x = approach(leg.upper.rotation.x, state === "grounded" ? legSwing : -0.72, step);
-    leg.lower.rotation.x = approach(leg.lower.rotation.x, state === "grounded" ? Math.max(0, -legSwing) * 0.82 : 1.05, step);
+    const legSwing = gait * legStride * leg.side;
+    // +X at the hip puts the knees in front of the pilot (forward is -Z).
+    // The old signs folded both knees through the back of the body in flight.
+    leg.upper.rotation.x = approach(leg.upper.rotation.x, state === "grounded" ? legSwing : 0.72, step);
+    leg.lower.rotation.x = approach(leg.lower.rotation.x, state === "grounded" ? -Math.max(0, legSwing) * 0.62 : -1.05, step);
   }
 }
 
@@ -232,6 +237,7 @@ export class ParachutistController {
     this.groundHeight = null;
     this.groundClearance = Infinity;
     this.launchTarget = null;
+    this.launchMode = null;
     this.previousGroundPose = null;
     this.crashed = false;
   }
@@ -243,8 +249,7 @@ export class ParachutistController {
       this.previousGroundPose = { lat: this.lat, lon: this.lon, height: this.height };
       this.heading = MathUtils.euclideanModulo(this.heading + ctrl.roll * 1.9 * dt, Math.PI * 2);
       const direction = MathUtils.clamp(-ctrl.pitch, -1, 1);
-      const pace = ctrl.throttle > 0 ? RUN_SPEED : WALK_SPEED;
-      const target = direction * pace;
+      const target = direction * WALK_SPEED;
       this.speed += (target - this.speed) * (1 - Math.exp(-12 * dt));
       if (Math.abs(direction) < 0.02) this.speed *= Math.exp(-14 * dt);
       advance(this, this.speed * dt);
@@ -256,16 +261,29 @@ export class ParachutistController {
 
     if (this.state === "launching") {
       this.heading = MathUtils.euclideanModulo(this.heading + ctrl.roll * 0.65 * dt, Math.PI * 2);
-      this.speed += (8.5 - this.speed) * (1 - Math.exp(-2.5 * dt));
-      this.verticalSpeed += (7 - this.verticalSpeed) * (1 - Math.exp(-2 * dt));
+      const rocket = this.launchMode === "rocket";
+      const descend = Math.max(0, MathUtils.clamp(ctrl.pitch, -1, 1));
+      const climb = Math.max(0, -MathUtils.clamp(ctrl.pitch, -1, 1));
+      const targetSpeed = rocket ? 8.5 : 6.2;
+      // Space gives a low, controllable hop. S can cancel it immediately and
+      // hand control back to normal canopy flight for a nearby landing.
+      const targetVertical = rocket ? 7 : 2.25 + climb * 0.9 - descend * 4.2;
+      this.speed += (targetSpeed - this.speed) * (1 - Math.exp(-2.5 * dt));
+      this.verticalSpeed += (targetVertical - this.verticalSpeed) * (1 - Math.exp(-(rocket ? 2 : 4) * dt));
       this.height += this.verticalSpeed * dt;
       advance(this, this.speed * dt);
-      this.pitch = 0.28;
+      this.pitch = Math.atan2(this.verticalSpeed, Math.max(0.1, this.speed));
       this.roll += (-ctrl.roll * 0.3 - this.roll) * (1 - Math.exp(-4 * dt));
+      if (!rocket && descend > 0.2) {
+        this.state = "airborne";
+        this.launchMode = null;
+        return;
+      }
       if (this.launchTarget != null && this.height >= this.launchTarget) {
         this.state = "airborne";
         this.verticalSpeed = -1.2;
         this.pitch = -0.08;
+        this.launchMode = null;
       }
       return;
     }
@@ -300,20 +318,22 @@ export class ParachutistController {
     this.groundHeight = surfaceHeight;
     this.groundClearance = 0;
     this.launchTarget = null;
+    this.launchMode = null;
     this.speed = 0;
     this.verticalSpeed = 0;
     this.pitch = 0;
     this.roll = 0;
   }
 
-  takeOff(surfaceHeight = this.groundHeight ?? this.height) {
+  takeOff(surfaceHeight = this.groundHeight ?? this.height, mode = "gentle") {
     if (this.state !== "grounded") return false;
     this.state = "launching";
     this.groundHeight = surfaceHeight;
-    this.launchTarget = surfaceHeight + 80;
+    this.launchMode = mode === "rocket" ? "rocket" : "gentle";
+    this.launchTarget = surfaceHeight + (this.launchMode === "rocket" ? ROCKET_LAUNCH_HEIGHT : GENTLE_LAUNCH_HEIGHT);
     this.groundClearance = Infinity;
-    this.speed = 4;
-    this.verticalSpeed = 2.5;
+    this.speed = this.launchMode === "rocket" ? 4 : 3.2;
+    this.verticalSpeed = this.launchMode === "rocket" ? 2.5 : 1.2;
     return true;
   }
 

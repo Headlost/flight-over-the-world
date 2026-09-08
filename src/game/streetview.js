@@ -25,9 +25,7 @@ export async function createStreetWalk(container, maps, origin = SPAWN) {
   const service = new maps.StreetViewService();
   const data = await findPano(service, maps, origin.lat, origin.lon);
   if (!data) {
-    throw new Error(
-      "Brak Street View przy Jarzębinowej, albo klucz nie ma włączonego Maps JavaScript API."
-    );
+    throw new Error("Street View is unavailable within 700 m of this landing point.");
   }
 
   const pano = new maps.StreetViewPanorama(container, {
@@ -55,18 +53,20 @@ export async function createStreetWalk(container, maps, origin = SPAWN) {
     keys: new Set(),
     lastStep: 0,
     place: data.location.shortDescription || origin.name,
+    active: true,
+    frame: 0,
   };
 
-  const onKey = (down) => (e) => {
+  const onKeyDown = (e) => {
     const k = e.key.toLowerCase();
-    if (down) state.keys.add(k);
-    else state.keys.delete(k);
+    state.keys.add(k);
     if (["w", "a", "s", "d", "arrowup", "arrowdown", "arrowleft", "arrowright"].includes(k)) {
       e.preventDefault();
     }
   };
-  window.addEventListener("keydown", onKey(true));
-  window.addEventListener("keyup", onKey(false));
+  const onKeyUp = (e) => state.keys.delete(e.key.toLowerCase());
+  window.addEventListener("keydown", onKeyDown);
+  window.addEventListener("keyup", onKeyUp);
 
   maps.event.addListenerOnce(pano, "status_changed", () => {
     maps.event.trigger(pano, "resize");
@@ -80,6 +80,7 @@ export async function createStreetWalk(container, maps, origin = SPAWN) {
 
   let last = performance.now();
   function tick(now) {
+    if (!state.active) return;
     const dt = Math.min(0.05, (now - last) / 1000);
     last = now;
     const pov = pano.getPov();
@@ -94,9 +95,19 @@ export async function createStreetWalk(container, maps, origin = SPAWN) {
       stepAlong(state, forward ? heading : heading + 180);
       state.lastStep = now;
     }
-    requestAnimationFrame(tick);
+    state.frame = requestAnimationFrame(tick);
   }
-  requestAnimationFrame(tick);
+  state.frame = requestAnimationFrame(tick);
+
+  state.destroy = () => {
+    if (!state.active) return;
+    state.active = false;
+    cancelAnimationFrame(state.frame);
+    state.keys.clear();
+    window.removeEventListener("keydown", onKeyDown);
+    window.removeEventListener("keyup", onKeyUp);
+    maps.event.clearInstanceListeners(pano);
+  };
 
   return state;
 }

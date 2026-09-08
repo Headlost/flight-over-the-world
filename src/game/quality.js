@@ -1,13 +1,13 @@
 export const QUALITY = Object.freeze({
-  performance: { label: 'Performance', pixels: 1920 * 1080, dpr: 1, error: 12, bytes: 320e6, shadows: false },
-  ultra: { label: 'Ultra 4K — very demanding, may lag', pixels: 3840 * 2160, dpr: 4, error: 2, bytes: 1200e6, shadows: true },
+  // One adaptive profile gives the tile streamer enough GPU budget for sharp
+  // nearby scenery without forcing every display to render a 4K framebuffer.
+  performance: { label: 'Adaptive high detail', pixels: 2560 * 1440, dpr: 1.5, error: 7, bytes: 600e6, shadows: false },
 });
 
-// Ultra supersamples smaller screens, preserving aspect ratio and GPU limits.
 export function renderRatio(key, width, height, deviceRatio = 1, maxSize = 8192) {
   const q = QUALITY[key] || QUALITY.performance;
   const budget = Math.sqrt(q.pixels / Math.max(1, width * height));
-  const desired = key === 'ultra' ? budget : Math.min(deviceRatio, q.dpr, budget);
+  const desired = Math.min(deviceRatio, q.dpr, budget);
   return Math.max(0.1, Math.min(desired, maxSize / width, maxSize / height));
 }
 

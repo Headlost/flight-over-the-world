@@ -39,7 +39,7 @@ input[style*="display: none"] + .pick-location, input.locked + .pick-location { 
 #flight-status:empty { display: none; }
 #movement-status { position: fixed; left: 50%; bottom: 126px; z-index: 4; transform: translateX(-50%); max-width: min(680px, calc(100vw - 28px)); padding: 8px 13px; border: 1px solid #7ec8e380; border-radius: 999px; background: #09131cd9; color: #f4f8ff; font: 700 11px/1.4 system-ui; letter-spacing: .045em; text-align: center; pointer-events: none; }
 #movement-status[hidden] { display: none; }
-#street-view-link { position: fixed; left: 50%; bottom: 82px; z-index: 6; transform: translateX(-50%); padding: 9px 15px; border: 1px solid #b7e5ff99; border-radius: 999px; background: #0d3858e8; color: #fff; font: 700 12px/1.2 system-ui; text-decoration: none; box-shadow: 0 8px 24px #0006; }
+#street-view-link { position: fixed; left: 50%; bottom: 82px; z-index: 6; width: auto; margin: 0; transform: translateX(-50%); padding: 9px 15px; border: 1px solid #b7e5ff99; border-radius: 999px; background: #0d3858e8; color: #fff; font: 700 12px/1.2 system-ui; text-decoration: none; box-shadow: 0 8px 24px #0006; cursor: pointer; }
 #street-view-link:hover, #street-view-link:focus-visible { background: #14547f; outline: 2px solid #fff; outline-offset: 2px; }
 #street-view-link[hidden] { display: none; }
 button:focus-visible, input:focus-visible, select:focus-visible, summary:focus-visible { outline: 3px solid #80c6ff; outline-offset: 3px; }
@@ -204,6 +204,17 @@ kbd {
 #streetview.open {
   display: block;
 }
+
+#street-mode { position: fixed; inset: 0; z-index: 80; display: none; background: #111; }
+#street-mode.open { display: block; }
+#street-mode #streetview { display: block; width: 100%; height: 100%; }
+.street-mode-hud { position: absolute; z-index: 2; top: max(14px, env(safe-area-inset-top)); left: 50%; transform: translateX(-50%); display: flex; align-items: center; gap: 12px; width: min(940px, calc(100vw - 28px)); padding: 10px 12px; border: 1px solid #fff4; border-radius: 12px; background: #08131de8; color: #fff; font: 13px/1.35 system-ui; box-shadow: 0 10px 35px #0008; }
+.street-mode-hud strong { white-space: nowrap; }
+.street-mode-hud span { flex: 1; }
+.street-mode-hud button { width: auto; margin: 0; padding: 9px 12px; white-space: nowrap; }
+.street-prompt-actions { display: flex; gap: 10px; }
+.street-prompt-actions button { margin: 0; }
+@media (max-width: 720px) { .street-mode-hud { align-items: stretch; flex-direction: column; } .street-mode-hud button { white-space: normal; } .street-prompt-actions { flex-direction: column; } }
 
 #fatal {
   position: fixed;
