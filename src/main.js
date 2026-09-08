@@ -311,6 +311,7 @@ let detailCameraRegistered = 0;
 let terrainDetailChangedAt = 0;
 let streetWalk = null;
 let streetModeActive = false;
+let externalStreetWindow = null;
 let selectedPlane = "pa28";
 let menuOpen = true;
 let paused = false;
@@ -2339,7 +2340,7 @@ document.addEventListener('visibilitychange', () => { if (document.hidden) clear
 function clearFlightInput() {
   keys.clear(); ctrl.roll = 0; ctrl.pitch = 0; ctrl.throttle = 0;
   resetStick(); touch.boost = false; touch.brake = false; stopTalk();
-  if (!menuOpen && !guessOpen) setPaused(true);
+  if (!menuOpen && !guessOpen && !streetModeActive) setPaused(true);
 }
 
 const touch = { roll: 0, pitch: 0, boost: false, brake: false, pid: null };
@@ -2512,8 +2513,21 @@ function showStreetPrompt() {
 async function enterStreetView() {
   if (!plane || plane.state !== "grounded") return;
   if (!GOOGLE_MAPS_KEY) {
-    window.open(streetViewUrl(), "fotw-street-view", "noopener,noreferrer");
     el.streetPrompt.close();
+    externalStreetWindow = window.open(streetViewUrl(), "fotw-street-view", "popup=yes,width=1280,height=800");
+    if (!externalStreetWindow) {
+      el.streetPromptCopy.textContent = "The browser blocked the Street View window.";
+      el.streetPromptNote.textContent = "Allow pop-ups for this site and try again.";
+      if (!el.streetPrompt.open) el.streetPrompt.showModal();
+      return;
+    }
+    try { externalStreetWindow.opener = null; } catch { /* cross-origin protection */ }
+    streetModeActive = true;
+    keys.clear();
+    el.streetView.innerHTML = '<div class="street-external-card"><strong>Street View is open in another window</strong><span>Return to this game window, then press Escape or Space to close Street View and continue from the saved landing point.</span></div>';
+    el.streetModeStatus.textContent = "The no-key viewer cannot transfer movement back to the game. Your landing point is safely preserved.";
+    el.streetMode.classList.add("open", "external");
+    el.streetMode.setAttribute("aria-hidden", "false");
     return;
   }
   const origin = { lat: plane.latDeg, lon: plane.lonDeg, name: "landing point" };
@@ -2560,8 +2574,10 @@ function leaveStreetView() {
   }
   streetWalk?.destroy?.();
   streetWalk = null;
+  try { externalStreetWindow?.close(); } catch { /* already closed */ }
+  externalStreetWindow = null;
   streetModeActive = false;
-  el.streetMode.classList.remove("open");
+  el.streetMode.classList.remove("open", "external");
   el.streetMode.setAttribute("aria-hidden", "true");
   el.streetView.replaceChildren();
   keys.clear();
