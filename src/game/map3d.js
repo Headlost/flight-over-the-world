@@ -8,7 +8,7 @@ import { buildWorld } from "./world.js";
 import { resolveCirclePoly } from "./shapes.js";
 import { createPlayer, createControls, updatePlayer, updateCamera } from "./player.js";
 import { setLoader, hideLoader, updateCoords, drawMinimap, createLabels, projectLabels } from "./hud.js";
-import { showStreetPeek, hideStreetPeek } from "./streetview.js";
+import { streetViewUrl } from "./streetview.js";
 
 export async function startMap3d() {
   setLoader("Pobieram budynki z OpenStreetMap…", 0.15);
@@ -74,8 +74,7 @@ export async function startMap3d() {
   controls.yaw = -0.7;
   const labelNodes = createLabels(labels.slice(0, 80));
   const minimap = document.getElementById("minimap");
-  const peek = document.getElementById("streetview");
-  let peekOpen = false;
+  let streetWindow = null;
 
   addEventListener("resize", () => {
     camera.aspect = innerWidth / innerHeight;
@@ -83,17 +82,16 @@ export async function startMap3d() {
     renderer.setSize(innerWidth, innerHeight);
   });
 
-  window.addEventListener("keydown", async (e) => {
-    if (e.key === "Escape" && peekOpen) {
-      hideStreetPeek(peek);
-      peekOpen = false;
+  window.addEventListener("keydown", (e) => {
+    if (e.key === "Escape" && streetWindow && !streetWindow.closed) {
+      streetWindow.close();
+      streetWindow = null;
       return;
     }
-    if (e.key.toLowerCase() !== "v" || peekOpen) return;
+    if (e.key.toLowerCase() !== "v") return;
     const { lat, lon } = worldToLatLon(player.position.x, player.position.z);
     const heading = ((-controls.yaw * 180) / Math.PI + 360) % 360;
-    const ok = await showStreetPeek(peek, lat, lon, heading);
-    peekOpen = ok;
+    streetWindow = window.open(streetViewUrl(lat, lon, heading), "fotw-street-view", "popup=yes,width=1280,height=800");
   });
 
   hideLoader();
@@ -103,7 +101,7 @@ export async function startMap3d() {
   function frame(now) {
     const dt = Math.min(0.05, (now - last) / 1000);
     last = now;
-    if (!peekOpen) {
+    if (!streetWindow || streetWindow.closed) {
       updatePlayer(player, controls, colliders, dt);
       updateCamera(camera, player, controls, colliders);
     }

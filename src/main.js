@@ -65,7 +65,7 @@ import {
 } from "./game/explosion.js";
 import { updateEngineSound, engineDebug } from "./game/engineSound.js";
 import { updateMusic, primeMusic, musicDebug } from "./game/music.js";
-import { createStreetWalk, loadGoogleMaps, streetLatLon } from "./game/streetview.js";
+import { streetViewUrl } from "./game/streetview.js";
 
 // rakieta stoi pionowo (+Y) — połóż ją nosem do przodu (-Z, konwencja lotu)
 function prepareRocket(model) {
@@ -193,7 +193,6 @@ const GUESS_SCOPES = {
 };
 
 const ION_KEY = settings.ion;
-const GOOGLE_MAPS_KEY = import.meta.env.VITE_GOOGLE_MAPS_KEY || "";
 const TERRAIN_ALT = 120; // przybliżona wysokość elipsoidalna nizin
 
 // Access depends on the provider account, enabled asset, region and quotas.
@@ -309,7 +308,6 @@ let firstPersonActive = false;
 let terrainDetailMode = "normal";
 let detailCameraRegistered = 0;
 let terrainDetailChangedAt = 0;
-let streetWalk = null;
 let streetModeActive = false;
 let externalStreetWindow = null;
 let selectedPlane = "pa28";
@@ -2495,85 +2493,39 @@ const settingsUI = setupSettings(() => { adaptiveQuality.reset(); applyQuality()
 setupLocationPicker(() => { if (!menuOpen) setPaused(true); });
 const orbit = { yaw:0, pitch:0.25, zoom:1, dragging:false };
 
-function streetViewUrl() {
-  const viewpoint = `${plane.latDeg.toFixed(6)},${plane.lonDeg.toFixed(6)}`;
-  return `https://www.google.com/maps/@?api=1&map_action=pano&viewpoint=${encodeURIComponent(viewpoint)}&heading=${Math.round(plane.headingDeg)}&pitch=0&fov=80`;
-}
-
 function showStreetPrompt() {
   if (!plane || plane.state !== "grounded" || streetModeActive) return;
   el.streetPromptCopy.textContent = "The game will look for imagery on the closest available street. On a roof or a building, the panorama may begin beside the building instead of at the exact landing point.";
-  el.streetPromptNote.textContent = GOOGLE_MAPS_KEY
-    ? "Your position in Street View will be transferred back to the game when you leave."
-    : "Integrated Street View is unavailable on this deployment, so Google Maps will open separately. Return to this game tab to continue; movement in Google Maps cannot be transferred back without the site Street View service.";
-  el.streetEnter.textContent = GOOGLE_MAPS_KEY ? "Enter Street View" : "Open nearest Street View";
+  el.streetPromptNote.textContent = "Google Maps opens separately without a paid API. Return to this game tab to continue; browser security prevents transferring movement from Google Maps back to the game.";
+  el.streetEnter.textContent = "Open nearest Street View";
   if (!el.streetPrompt.open) el.streetPrompt.showModal();
 }
 
 async function enterStreetView() {
   if (!plane || plane.state !== "grounded") return;
-  if (!GOOGLE_MAPS_KEY) {
-    el.streetPrompt.close();
-    externalStreetWindow = window.open(streetViewUrl(), "fotw-street-view", "popup=yes,width=1280,height=800");
-    if (!externalStreetWindow) {
-      el.streetPromptCopy.textContent = "The browser blocked the Street View window.";
-      el.streetPromptNote.textContent = "Allow pop-ups for this site and try again.";
-      if (!el.streetPrompt.open) el.streetPrompt.showModal();
-      return;
-    }
-    try { externalStreetWindow.opener = null; } catch { /* cross-origin protection */ }
-    streetModeActive = true;
-    keys.clear();
-    el.streetView.innerHTML = '<div class="street-external-card"><strong>Street View is open in another window</strong><span>Return to this game window, then press Escape or Space to close Street View and continue from the saved landing point.</span></div>';
-    el.streetModeStatus.textContent = "The no-key viewer cannot transfer movement back to the game. Your landing point is safely preserved.";
-    el.streetMode.classList.add("open", "external");
-    el.streetMode.setAttribute("aria-hidden", "false");
+  el.streetPrompt.close();
+  externalStreetWindow = window.open(
+    streetViewUrl(plane.latDeg, plane.lonDeg, plane.headingDeg),
+    "fotw-street-view",
+    "popup=yes,width=1280,height=800"
+  );
+  if (!externalStreetWindow) {
+    el.streetPromptCopy.textContent = "The browser blocked the Street View window.";
+    el.streetPromptNote.textContent = "Allow pop-ups for this site and try again.";
+    if (!el.streetPrompt.open) el.streetPrompt.showModal();
     return;
   }
-  const origin = { lat: plane.latDeg, lon: plane.lonDeg, name: "landing point" };
-  el.streetPrompt.close();
+  try { externalStreetWindow.opener = null; } catch { /* cross-origin protection */ }
   streetModeActive = true;
   keys.clear();
-  el.streetMode.classList.add("open");
+  el.streetView.innerHTML = '<div class="street-external-card"><strong>Street View is open in another window</strong><span>Return to this game window, then press Escape or Space to close Street View and continue from the saved landing point.</span></div>';
+  el.streetModeStatus.textContent = "This no-key viewer preserves the landing point. Movement inside Google Maps cannot be transferred back to the game.";
+  el.streetMode.classList.add("open", "external");
   el.streetMode.setAttribute("aria-hidden", "false");
-  el.streetModeStatus.textContent = "Finding the closest Street View panorama…";
-  try {
-    const maps = await loadGoogleMaps(GOOGLE_MAPS_KEY);
-    if (!streetModeActive) return;
-    streetWalk = await createStreetWalk(el.streetView, maps, origin);
-    if (!streetModeActive) { streetWalk.destroy?.(); streetWalk = null; return; }
-    const start = streetLatLon(streetWalk);
-    const offset = Math.round(distanceM(origin.lat, origin.lon, start.lat, start.lon));
-    el.streetModeStatus.textContent = offset > 20
-      ? `Street View was unavailable at the landing point. Started on the nearest street, ${offset} m away. Click and drag once, then use W/A/S/D.`
-      : "Click and drag once, then use W/S to move and A/D to turn.";
-  } catch (error) {
-    streetWalk?.destroy?.();
-    streetWalk = null;
-    streetModeActive = false;
-    el.streetMode.classList.remove("open");
-    el.streetMode.setAttribute("aria-hidden", "true");
-    el.streetPromptCopy.textContent = error?.message || "Street View is unavailable here.";
-    el.streetPromptNote.textContent = "You can keep walking in the 3D world or try again after moving closer to a street.";
-    el.streetEnter.textContent = "Try again";
-    if (!el.streetPrompt.open) el.streetPrompt.showModal();
-  }
 }
 
 function leaveStreetView() {
   if (!streetModeActive) return;
-  if (streetWalk && plane) {
-    const position = streetLatLon(streetWalk);
-    const pov = streetWalk.pano.getPov();
-    plane.lat = position.lat * MathUtils.DEG2RAD;
-    plane.lon = position.lon * MathUtils.DEG2RAD;
-    plane.heading = MathUtils.euclideanModulo((pov?.heading || 0) * MathUtils.DEG2RAD, Math.PI * 2);
-    plane.speed = 0;
-    plane.previousGroundPose = null;
-    camInit = false;
-  }
-  streetWalk?.destroy?.();
-  streetWalk = null;
   try { externalStreetWindow?.close(); } catch { /* already closed */ }
   externalStreetWindow = null;
   streetModeActive = false;

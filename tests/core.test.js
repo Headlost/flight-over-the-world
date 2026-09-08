@@ -6,6 +6,7 @@ import { parseCoordinates, geocodeCity } from '../src/game/location.js';
 import { validMessage, escapeHtml } from '../src/game/protocol.js';
 import { renderRatio, AdaptiveQuality } from '../src/game/quality.js';
 import { disposeModel } from '../src/game/dispose.js';
+import { streetViewUrl } from '../src/game/streetview.js';
 import { Box3, Group, Mesh, BoxGeometry, MeshBasicMaterial, Texture, Vector3 } from 'three';
 
 test('coordinates bypass network and geographic bounds are validated', async () => {
@@ -14,6 +15,14 @@ test('coordinates bypass network and geographic bounds are validated', async () 
   assert.equal(parseCoordinates('Paris'), null);
   await assert.rejects(geocodeCity('91, 0'), /Coordinates/);
   assert.throws(() => parseCoordinates('0, 181'));
+});
+test('Street View uses a keyless Google Maps URL', () => {
+  const url = new URL(streetViewUrl(52.38871, 16.60069, -15));
+  assert.equal(url.origin, 'https://www.google.com');
+  assert.equal(url.searchParams.get('api'), '1');
+  assert.equal(url.searchParams.get('map_action'), 'pano');
+  assert.equal(url.searchParams.get('heading'), '345');
+  assert.equal(url.searchParams.has('key'), false);
 });
 test('adaptive high detail stays within a 1440p and hardware budget', () => {
   assert.ok(Math.abs(renderRatio('performance',1920,1080,3) - 4/3) < 0.001);
