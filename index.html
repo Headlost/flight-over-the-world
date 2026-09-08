@@ -16,6 +16,7 @@
   </head>
   <body>
     <audio id="bgm" autoplay loop playsinline preload="auto" src="./music/reflection.mp3"></audio>
+    <audio id="black-hole-score" playsinline preload="metadata" src="./music/no-time-for-caution.mp3"></audio>
     <div id="fatal" class="hidden">
       <div class="fatal-card">
         <h2>Could not start</h2>
@@ -222,10 +223,21 @@
     </nav>
 
     <section id="interstellar" aria-live="assertive" aria-hidden="true">
-      <div class="interstellar-tunnel"></div>
-      <div class="interstellar-title">INTERSTELLAR</div>
-      <div class="interstellar-sub">Unknown gravity slingshot · destination: Earth</div>
+      <div class="event-horizon-void" aria-hidden="true"></div>
+      <div class="tesseract" aria-hidden="true">
+        <div class="tesseract-core"></div>
+        <div class="tesseract-shelves">
+          <i></i><i></i><i></i><i></i><i></i><i></i>
+          <i></i><i></i><i></i><i></i><i></i><i></i>
+        </div>
+      </div>
+      <div id="transit-status" class="interstellar-sub">EVENT HORIZON · NO RETURN</div>
     </section>
+
+    <aside id="location-arrival" aria-hidden="true">
+      <strong>COOPER FARM · ALBERTA</strong>
+      <span>50.4064° N · 114.2043° W · original filming field</span>
+    </aside>
 
     <section id="street-mode" aria-label="Street View" aria-hidden="true">
       <div id="streetview"></div>

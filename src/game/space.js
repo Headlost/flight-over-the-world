@@ -18,13 +18,13 @@ import {
   PointsMaterial,
   Quaternion,
   RingGeometry,
-  ShaderMaterial,
   SphereGeometry,
   SRGBColorSpace,
   TextureLoader,
   TorusGeometry,
   Vector3,
 } from "three";
+import { createRelativisticBlackHole } from "./black-hole.js";
 
 // Distances and radii are deliberately compressed into a playable scale. The
 // names, order and appearance remain recognisable while a trip takes seconds,
@@ -40,7 +40,17 @@ export const SPACE_BODIES = Object.freeze([
   { name: "Saturn",  radius: 119, position: [7387, 92, 3567],    kind: "saturn",    color: "#d8bd7b", atmosphere: "#e3c986", rings: true, gasGiant: true },
   { name: "Uranus",  radius: 78,  position: [9671, -140, -4089], kind: "ice",       color: "#75d9df", atmosphere: "#91edf0", rings: true, gasGiant: true },
   { name: "Neptune", radius: 76,  position: [12593, 130, 2291],  kind: "ice",       color: "#2e65d2", atmosphere: "#4a87ff", gasGiant: true },
-  { name: "Galactic Core", radius: 96, position: [26000, 1200, -19000], kind: "blackhole", color: "#000000", hazard: "blackhole" },
+  {
+    name: "Galactic Core",
+    radius: 96,
+    position: [26000, 1200, -19000],
+    kind: "blackhole",
+    color: "#000000",
+    hazard: "blackhole",
+    diskOuter: 690,
+    gravityRange: 7600,
+    musicRange: 9500,
+  },
 ]);
 
 const REAL_TEXTURES = Object.freeze({
@@ -60,6 +70,8 @@ const UP = new Vector3(0, 1, 0);
 const RIGHT = new Vector3(1, 0, 0);
 const scratchQ = new Quaternion();
 const scratchV = new Vector3();
+const scratchGravity = new Vector3();
+const scratchVelocity = new Vector3();
 
 function clamp(value, min, max) {
   return Math.max(min, Math.min(max, value));
@@ -83,6 +95,8 @@ export class SpaceFlightController {
     this.orbitRadius = 0;
     this.orbitAngle = 0;
     this.hyperdrive = false;
+    this.gravityIntensity = 0;
+    this.gravityTrapped = false;
   }
 
   reset() {
@@ -95,6 +109,8 @@ export class SpaceFlightController {
     this.orbitRadius = 0;
     this.orbitAngle = 0;
     this.hyperdrive = false;
+    this.gravityIntensity = 0;
+    this.gravityTrapped = false;
   }
 
   enterOrbit(name = "Earth", clearance = 34) {
@@ -139,6 +155,40 @@ export class SpaceFlightController {
       }
     }
     return nearest ? { body: nearest, distance } : null;
+  }
+
+  applyGravity(name, dt) {
+    const body = this.bodies.get(name);
+    if (!body || !Number.isFinite(dt) || dt <= 0) {
+      this.gravityIntensity = 0;
+      this.gravityTrapped = false;
+      return null;
+    }
+    dt = Math.min(dt, 0.05);
+    const toCenter = scratchGravity.copy(body.position).sub(this.position);
+    const centerDistance = Math.max(1e-5, toCenter.length());
+    const surfaceDistance = centerDistance - body.radius;
+    const range = body.gravityRange || 7200;
+    const intensity = clamp(1 - Math.max(0, surfaceDistance) / range, 0, 1);
+    const relativeY = this.position.y - body.position.y;
+    const planarDistance = Math.hypot(
+      this.position.x - body.position.x,
+      this.position.z - body.position.z,
+    );
+    const trapped = planarDistance <= (body.diskOuter || body.radius * 7.2)
+      && Math.abs(relativeY) <= body.radius * 2.25;
+    this.gravityIntensity = intensity;
+    this.gravityTrapped = trapped;
+    if (intensity <= 0) return { centerDistance, surfaceDistance, intensity, trapped };
+
+    toCenter.multiplyScalar(1 / centerDistance);
+    const acceleration = (8 + intensity * intensity * 310) * (trapped ? 2.15 : 1);
+    scratchVelocity.copy(this.forward).multiplyScalar(this.speed).addScaledVector(toCenter, acceleration * dt);
+    this.speed = clamp(scratchVelocity.length(), 0, this.hyperSpeed * 1.35);
+    if (this.speed > 1e-4) this.forward.copy(scratchVelocity).multiplyScalar(1 / this.speed);
+    else this.forward.copy(toCenter);
+    if (trapped) this.hyperdrive = false;
+    return { centerDistance, surfaceDistance, intensity, trapped };
   }
 
   toggleNearestOrbit(maxSurfaceDistance = 260) {
@@ -357,72 +407,6 @@ function loadMaterialMap(loader, material, file, stats, { alphaOnly = false, bum
   }, undefined, () => { stats.failed += 1; });
 }
 
-function createBlackHole(body) {
-  const root = new Group();
-  root.name = body.name;
-  root.position.set(...body.position);
-  root.userData.body = body;
-
-  const eventHorizon = new Mesh(
-    new SphereGeometry(body.radius, 80, 48),
-    new MeshBasicMaterial({ color: 0x000000 }),
-  );
-  eventHorizon.name = "Event horizon";
-  root.add(eventHorizon);
-
-  const diskMaterial = new ShaderMaterial({
-    transparent: true,
-    depthWrite: false,
-    side: DoubleSide,
-    blending: AdditiveBlending,
-    uniforms: { uTime: { value: 0 } },
-    vertexShader: /* glsl */ `
-      varying vec3 vLocal;
-      void main() {
-        vLocal = position;
-        gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
-      }
-    `,
-    fragmentShader: /* glsl */ `
-      varying vec3 vLocal;
-      uniform float uTime;
-      void main() {
-        float r = length(vLocal.xy);
-        float t = clamp((r - 128.0) / 560.0, 0.0, 1.0);
-        float angle = atan(vLocal.y, vLocal.x);
-        float streams = 0.58 + 0.42 * sin(angle * 9.0 - t * 42.0 - uTime * (5.0 - t * 2.0));
-        float turbulence = 0.72 + 0.28 * sin(angle * 31.0 + t * 115.0 + uTime * 1.7);
-        float edge = smoothstep(0.0, 0.05, t) * (1.0 - smoothstep(0.82, 1.0, t));
-        vec3 hot = mix(vec3(1.0, 0.14, 0.015), vec3(1.0, 0.92, 0.54), pow(1.0 - t, 2.2));
-        gl_FragColor = vec4(hot * (0.7 + streams * 1.8), edge * streams * turbulence * 0.9);
-      }
-    `,
-  });
-  const disk = new Mesh(new RingGeometry(128, 690, 256, 18), diskMaterial);
-  disk.name = "Relativistic accretion disk";
-  disk.rotation.x = Math.PI / 2;
-  root.add(disk);
-
-  const haloMaterial = new MeshBasicMaterial({
-    color: 0xffb45d,
-    transparent: true,
-    opacity: 0.55,
-    blending: AdditiveBlending,
-    depthWrite: false,
-  });
-  const halo = new Mesh(new TorusGeometry(body.radius * 1.33, 7, 18, 160), haloMaterial);
-  halo.rotation.x = Math.PI / 2;
-  const photonRing = new Mesh(
-    new TorusGeometry(body.radius * 1.1, 2.5, 12, 128),
-    new MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.75, blending: AdditiveBlending, depthWrite: false }),
-  );
-  photonRing.rotation.x = Math.PI / 2;
-  root.add(halo, photonRing);
-  root.userData.diskMaterial = diskMaterial;
-  root.userData.disk = disk;
-  return root;
-}
-
 function createGalaxy(core, count) {
   const random = seededRandom(8675309);
   const positions = new Float32Array(count * 3);
@@ -533,7 +517,9 @@ export function createSolarSystem({ textureSize = 1024, starCount = 6500 } = {})
     const line = orbitLine(body);
     if (line) group.add(line);
     if (body.kind === "blackhole") {
-      const blackHole = createBlackHole(body);
+      const blackHole = createRelativisticBlackHole(body, {
+        raySteps: textureSize <= 512 ? 40 : 64,
+      });
       bodies.set(body.name, blackHole);
       group.add(blackHole);
       continue;
@@ -617,11 +603,10 @@ export function createSolarSystem({ textureSize = 1024, starCount = 6500 } = {})
   targetMarker.renderOrder = 20;
   group.add(targetMarker);
 
-  function update(dt, targetName, elapsed = 0) {
+  function update(dt, targetName, elapsed = 0, cameraPosition = null, blackHoleProximity = 0) {
     for (const [name, mesh] of bodies) {
       if (mesh.userData.body?.kind === "blackhole") {
-        mesh.userData.diskMaterial.uniforms.uTime.value = elapsed;
-        mesh.userData.disk.rotation.z += dt * 0.08;
+        mesh.userData.update?.(elapsed, cameraPosition, blackHoleProximity);
         continue;
       }
       mesh.rotation.y += dt * (name === "Jupiter" ? 0.12 : name === "Earth" ? 0.075 : 0.035);

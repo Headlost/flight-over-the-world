@@ -17,7 +17,7 @@ W Free flight wybrane miejsce jest startem. W Fly home jest celem, a start znajd
 | W / S | Nos w dół / w górę |
 | A / D | Przechylenie i zakręt |
 | Shift / Ctrl | Szybciej / wolniej; w kosmosie hiperprędkość / lot precyzyjny |
-| Prawy przycisk myszy i przeciąganie | Obrót kamery |
+| Prawy przycisk myszy i przeciąganie | Obrót kamery; w kosmosie działa też lewy przycisk |
 | Kółko myszy | Zoom |
 | C | Reset kamery |
 | Esc | Pauza |
@@ -44,9 +44,11 @@ W jednoosobowym **Free flight** wybierz **Rocket** i naciśnij `R`. Rakieta usta
 
 Na orbicie `E` lub przycisk pod listą celów rozpoczyna zejście. Na Merkurym, Wenus, Księżycu i Marsie można bezpiecznie osiąść przy małej prędkości, a `R` ponownie wynosi rakietę na orbitę. Gazowe olbrzymy nie mają stałej powierzchni — zejście pod warstwę chmur kończy się zniszczeniem przez ciśnienie. Powrót z orbity Ziemi zaczyna się na wysokości 100 km, a poniżej 6 km oddaje sterowanie graczowi i ponownie uruchamia fotorealistyczny renderer terenu.
 
-Zbliżenie do Słońca pokazuje ostrzeżenie o skrajnym cieple, a przekroczenie powierzchni niszczy rakietę. Centrum proceduralnej Drogi Mlecznej zawiera animowaną czarną dziurę z dyskiem akrecyjnym i pierścieniem fotonowym. Przekroczenie horyzontu zdarzeń uruchamia sekwencję **INTERSTELLAR** i przenosi gracza na orbitę Ziemi.
+Zbliżenie do Słońca pokazuje ostrzeżenie o skrajnym cieple, a przekroczenie powierzchni niszczy rakietę. Centrum proceduralnej Drogi Mlecznej zawiera czarną dziurę renderowaną shaderem z integracją geodezyjnych Schwarzschilda, soczewkowaniem, asymetrią Dopplera, przesunięciem grawitacyjnym, pierścieniem fotonowym i turbulentnym dyskiem akrecyjnym. W studni grawitacyjnej tor lotu jest coraz silniej zakrzywiany ku centrum. Po wejściu w dysk napęd nadświetlny przestaje działać, a wydostanie się staje się bardzo trudne.
 
-Geometria orbit, atmosfer, galaktyki i czarnej dziury powstaje proceduralnie dopiero po osiągnięciu kosmosu. Powierzchnie planet, Słońca i Księżyca, chmury Ziemi, atmosfera Wenus, pierścienie Saturna i panorama Drogi Mlecznej korzystają z lokalnie dołączonych map 2K [Solar System Scope](https://www.solarsystemscope.com/textures/), opartych na danych NASA i udostępnionych na licencji CC BY 4.0. Nie wykonują dodatkowych wywołań API. Odległości i promienie są skompresowane do skali gry, aby lot między planetami trwał kilkanaście sekund.
+W promieniu 9500 jednostek od centrum zaczyna narastać osobna ścieżka muzyczna. Po przekroczeniu horyzontu jej finał synchronizuje się z 15 sekundami lotu w czerni i 20-sekundową, proceduralną sekwencją przestrzennej biblioteki. Po niej gra wybiera spadochroniarza i dosadza postać na rzeczywistym polu zdjęciowym farmy Coopera pod Longview w Albercie (`50.4064, -114.2043`). Filmowy dom był dekoracją i został po zdjęciach rozebrany.
+
+Geometria orbit, atmosfer, galaktyki i czarnej dziury powstaje proceduralnie dopiero po osiągnięciu kosmosu. Shader czarnej dziury jest adaptacją technik z projektu [Adriwin06/black-hole](https://github.com/Adriwin06/black-hole) i jego źródła `oseiskar/black-hole`, udostępnionych na licencji MIT; pełne informacje są w [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md). Powierzchnie planet, Słońca i Księżyca, chmury Ziemi, atmosfera Wenus, pierścienie Saturna i panorama Drogi Mlecznej korzystają z lokalnie dołączonych map 2K [Solar System Scope](https://www.solarsystemscope.com/textures/), opartych na danych NASA i udostępnionych na licencji CC BY 4.0. Nie wykonują dodatkowych wywołań API. Odległości i promienie są skompresowane do skali gry, aby lot między planetami trwał kilkanaście sekund.
 
 ## Grafika
 

@@ -243,3 +243,24 @@ test('Sun and galactic core are reachable hazards rather than orbital capture ta
   assert.equal(flight.setTarget('Galactic Core', true), true);
   assert.equal(flight.targetName, 'Galactic Core');
 });
+
+test('galactic core gravity bends flight and traps a rocket inside the accretion disk', () => {
+  const flight = new SpaceFlightController();
+  const core = flight.bodies.get('Galactic Core');
+  flight.position.copy(core.position).add(new Vector3(560, 0, 0));
+  flight.forward.set(1, 0, 0);
+  flight.speed = 92;
+  flight.hyperdrive = true;
+  const outwardBefore = flight.forward.dot(new Vector3(1, 0, 0));
+  let state;
+  for (let i = 0; i < 30; i++) state = flight.applyGravity('Galactic Core', 1 / 60);
+  assert.equal(state.trapped, true);
+  assert.ok(state.intensity > 0.9);
+  assert.ok(flight.forward.dot(new Vector3(1, 0, 0)) < outwardBefore);
+  assert.equal(flight.hyperdrive, false);
+
+  flight.position.copy(core.position).add(new Vector3(core.gravityRange + core.radius + 10, 0, 0));
+  state = flight.applyGravity('Galactic Core', 1 / 60);
+  assert.equal(state.intensity, 0);
+  assert.equal(state.trapped, false);
+});
