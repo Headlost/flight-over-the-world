@@ -1,6 +1,6 @@
 import { settings, setupSettings } from './game/settings.js';
 import { disposeModel } from './game/dispose.js';
-import { QUALITY, renderRatio, AdaptiveQuality } from './game/quality.js';
+import { QUALITY, renderRatio, AdaptiveQuality, terrainStreamProfile } from './game/quality.js';
 import { geocodeCity, setupLocationPicker } from './game/location.js';
 import { validMessage, escapeHtml } from './game/protocol.js';
 import { renderAttributions } from './game/attribution.js';
@@ -308,6 +308,9 @@ let firstPersonActive = false;
 let terrainDetailMode = "normal";
 let detailCameraRegistered = 0;
 let terrainDetailChangedAt = 0;
+let terrainStreamingProfile = null;
+let terrainStreamingKey = "";
+let unloadTilesPlugin = null;
 let streetModeActive = false;
 let externalStreetWindow = null;
 let selectedPlane = "pa28";
@@ -1615,6 +1618,7 @@ function init() {
     alpha: false,
   });
   renderer.setClearColor(0x8ec8e8);
+  renderer.outputColorSpace = SRGBColorSpace;
   applyPixelRatio();
   renderer.setSize(innerWidth, innerHeight);
   renderer.toneMapping = 4;
@@ -1640,9 +1644,9 @@ function init() {
   scene.add(sun.target);
 
   camera = new PerspectiveCamera(70, innerWidth / innerHeight, 1, 2e6);
-  // Three hidden cameras cover the directions outside the player's current
-  // view. Together with the render camera they request a full 360° ring.
-  detailCameras = Array.from({ length: 3 }, () => new PerspectiveCamera(88, 16 / 9, 0.1, 1800));
+  // One low-resolution camera sweeps off-screen directions progressively. This
+  // leaves bandwidth and GPU time for the player's visible view first.
+  detailCameras = [new PerspectiveCamera(84, 16 / 9, 0.1, 1400)];
   firstPersonRig = createFirstPersonArms();
   camera.add(firstPersonRig);
   scene.add(camera);
@@ -1658,17 +1662,23 @@ function init() {
       })
     );
   }
-  tiles.registerPlugin(new TileCompressionPlugin());
+  // Keep texture mipmaps: anisotropic filtering needs them for crisp oblique
+  // roofs and facades. Index compression still reduces geometry memory.
+  tiles.registerPlugin(new TileCompressionPlugin({ disableMipmaps: false }));
   tiles.registerPlugin(new UpdateOnChangePlugin());
-  tiles.registerPlugin(new UnloadTilesPlugin({
+  unloadTilesPlugin = new UnloadTilesPlugin({
     delay: isMobile ? 3500 : 12000,
-    bytesTarget: isMobile ? 220e6 : 700e6,
-  }));
+    bytesTarget: isMobile ? 150e6 : 380e6,
+  });
+  tiles.registerPlugin(unloadTilesPlugin);
   tiles.registerPlugin(new TilesFadePlugin({ fadeDuration: 120, maximumFadeOutTiles: 24 }));
   const draco = new DRACOLoader();
   draco.setDecoderPath("https://www.gstatic.com/draco/versioned/decoders/1.5.7/");
   tiles.registerPlugin(new GLTFExtensionsPlugin({ dracoLoader: draco }));
-  tiles.parseQueue.maxJobs = isMobile ? 3 : 8;
+  const cpuThreads = navigator.hardwareConcurrency || 4;
+  tiles.parseQueue.maxJobs = isMobile ? 2 : Math.max(2, Math.min(3, Math.floor(cpuThreads / 2)));
+  tiles.downloadQueue.maxJobsPerOrigin = isMobile ? 6 : 8;
+  tiles.errorFalloffDensity = 1e-3;
   tiles.group.rotation.x = -Math.PI / 2;
   tiles.group.visible = false;
   scene.add(tiles.group);
@@ -2559,20 +2569,34 @@ function applyQuality() {
 }
 
 function setTerrainDetail(modeName) {
-  if (!tiles || modeName === terrainDetailMode) return;
-  terrainDetailMode = modeName;
-  terrainDetailChangedAt = performance.now();
+  if (!tiles) return;
+  if (modeName !== terrainDetailMode) {
+    terrainDetailMode = modeName;
+    terrainDetailChangedAt = performance.now();
+    terrainStreamingKey = "";
+  }
+  tuneTerrainStreaming();
+}
+
+function tuneTerrainStreaming() {
+  const cacheFull = Boolean(tiles?.lruCache?.isFull?.());
+  const profile = terrainStreamProfile(terrainDetailMode, adaptiveQuality.lastFps, isMobile, cacheFull);
   const q = QUALITY[settings.quality];
-  const landing = modeName === "landing";
-  const street = modeName === "street";
-  tiles.errorTarget = street ? Math.min(q.error, isMobile ? 4 : 2.25) : landing ? Math.min(q.error, isMobile ? 6 : 3.5) : q.error;
-  tiles.lruCache.maxSize = street ? (isMobile ? 3600 : 7000) : landing ? (isMobile ? 2800 : 5200) : 2400;
-  tiles.lruCache.minSize = Math.round(tiles.lruCache.maxSize * 0.58);
-  const bytes = street ? Math.max(q.bytes, isMobile ? 420e6 : 1000e6) : landing ? Math.max(q.bytes, isMobile ? 360e6 : 720e6) : q.bytes;
-  tiles.lruCache.maxBytesSize = bytes;
-  tiles.lruCache.minBytesSize = bytes * 0.68;
-  tiles.loadSiblings = modeName !== "normal" || !isMobile;
+  const profileKey = [terrainDetailMode, profile.error, profile.maxTilesProcessed, profile.prefetch, cacheFull].join(":");
+  terrainStreamingProfile = profile;
+  if (profileKey === terrainStreamingKey) return profile;
+  terrainStreamingKey = profileKey;
+  tiles.errorTarget = Math.min(q.error, profile.error);
+  tiles.errorFalloff = profile.errorFalloff;
+  tiles.maxTilesProcessed = profile.maxTilesProcessed;
+  tiles.lruCache.maxSize = profile.cacheTiles;
+  tiles.lruCache.minSize = Math.round(profile.cacheTiles * 0.48);
+  tiles.lruCache.maxBytesSize = profile.cacheBytes;
+  tiles.lruCache.minBytesSize = profile.cacheBytes * 0.58;
+  if (unloadTilesPlugin) unloadTilesPlugin.bytesTarget = profile.gpuBytes;
+  tiles.loadSiblings = !isMobile;
   tiles.setResolutionFromRenderer(camera, renderer);
+  return profile;
 }
 
 function updateDetailCamera() {
@@ -2580,10 +2604,9 @@ function updateDetailCamera() {
   const modeAge = performance.now() - terrainDetailChangedAt;
   const streetSweep = terrainDetailMode === "street";
   const active = terrainDetailMode === "landing" || streetSweep;
-  if (terrainDetailMode === "street") {
-    const q = QUALITY[settings.quality];
-    tiles.errorTarget = Math.min(q.error, isMobile ? 4 : modeAge >= 5000 ? 1.5 : 2.25);
-  }
+  const profile = frameCount % 45 === 0 || !terrainStreamingProfile
+    ? tuneTerrainStreaming()
+    : terrainStreamingProfile;
   if (!active) {
     while (detailCameraRegistered > 0) {
       detailCameraRegistered -= 1;
@@ -2591,7 +2614,11 @@ function updateDetailCamera() {
     }
     return;
   }
-  const wanted = streetSweep ? (isMobile ? 2 : 3) : 1;
+  // Wait for the visible view to settle, then sweep one off-screen sector at a
+  // time. Under load the sweep is removed immediately and only the main camera
+  // can request tiles.
+  const warm = modeAge >= (streetSweep ? 3500 : 1800);
+  const wanted = warm && profile.prefetch && !tiles.isLoading ? 1 : 0;
   while (detailCameraRegistered < wanted) {
     tiles.setCamera(detailCameras[detailCameraRegistered]);
     detailCameraRegistered += 1;
@@ -2601,12 +2628,11 @@ function updateDetailCamera() {
     tiles.deleteCamera(detailCameras[detailCameraRegistered]);
   }
   const detailHeight = Math.max(-500, groundAlt) + 1.75;
-  const width = isMobile ? 480 : streetSweep ? 800 : 720;
+  const width = profile.prefetchWidth;
   for (let i = 0; i < detailCameraRegistered; i++) {
     const detailCamera = detailCameras[i];
-    // The visible camera covers the current direction; these cameras start at
-    // 90° and fill the remaining ring in parallel.
-    const detailHeading = plane.heading + (i + 1) * Math.PI / 2;
+    const sweepSector = streetSweep ? 1 + Math.floor((modeAge - 3500) / 1600) % 3 : 1;
+    const detailHeading = plane.heading + sweepSector * Math.PI / 2;
     const matrix = frameAt(plane.lat, plane.lon, detailHeight, detailHeading, -0.06, 0);
     matrix.decompose(detailCamera.position, detailCamera.quaternion, detailCamera.scale);
     detailCamera.updateMatrixWorld(true);
@@ -2656,7 +2682,10 @@ function tickFrame() {
   const rawDt = clock.getDelta();
   if (document.hidden) return;
   const dt = Math.min(rawDt, 0.05);
-  if (!menuOpen && !paused && settings.adaptive && adaptiveQuality.sample(rawDt)) applyPixelRatio();
+  if (!menuOpen && !paused) {
+    const qualityChanged = adaptiveQuality.sample(rawDt);
+    if (settings.adaptive && qualityChanged) applyPixelRatio();
+  }
   frameCount += 1;
   scene.updateMatrixWorld();
 
@@ -2998,8 +3027,8 @@ function tickFrame() {
     flightStatus.hidden = menuOpen;
     const detailProgress = Math.round((tiles.loadProgress || 0) * 100);
     const detailLabel = terrainDetailMode === 'street' && tiles.isLoading
-      ? ` · Loading 360° ground detail ${detailProgress}%…`
-      : terrainDetailMode === 'street' ? ' · 360° ground detail ready' : tiles.isLoading ? ' · Streaming terrain…' : '';
+      ? ` · Sharpening current view ${detailProgress}%…`
+      : terrainDetailMode === 'street' ? ' · Ground detail ready' : tiles.isLoading ? ' · Streaming terrain…' : '';
     flightStatus.textContent = loadError || QUALITY[settings.quality].label + ' · ' + canvas.width + ' × ' + canvas.height + ' · ' + Math.round(1 / Math.max(rawDt,0.001)) + ' FPS' + detailLabel;
     renderAttributions(credits, tiles.getAttributions([]));
     if (tiles.visibleTiles.size) {
@@ -3049,6 +3078,9 @@ function tickFrame() {
     terrainLoadProgress: tiles.loadProgress,
     terrainCacheBytes: tiles.lruCache.cachedBytes,
     detailCameraRegistered,
+    terrainErrorTarget: tiles.errorTarget,
+    measuredFps: adaptiveQuality.lastFps,
+    terrainCacheFull: tiles.lruCache.isFull(),
   };
   window.__cam = camera;
   window.__planeMesh = planeMesh;

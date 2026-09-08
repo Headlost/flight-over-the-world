@@ -4,7 +4,7 @@ import { PlaneController } from '../src/game/plane.js';
 import { createParachutistModel, ParachutistController, updateParachutistModel } from '../src/game/paraglider.js';
 import { parseCoordinates, geocodeCity } from '../src/game/location.js';
 import { validMessage, escapeHtml } from '../src/game/protocol.js';
-import { renderRatio, AdaptiveQuality } from '../src/game/quality.js';
+import { renderRatio, AdaptiveQuality, terrainStreamProfile } from '../src/game/quality.js';
 import { disposeModel } from '../src/game/dispose.js';
 import { streetViewUrl } from '../src/game/streetview.js';
 import { Box3, Group, Mesh, BoxGeometry, MeshBasicMaterial, Texture, Vector3 } from 'three';
@@ -37,6 +37,15 @@ test('adaptive rendering recovers and stays bounded', () => {
   for (let i=0;i<5000;i++) q.sample(1/60);
   assert.equal(q.scale,1);
   q.sample(Infinity); assert.equal(q.scale,1);
+});
+test('ground streaming prioritizes the visible view when frame rate is low', () => {
+  const stressed = terrainStreamProfile('street', 9, false, false);
+  const smooth = terrainStreamProfile('street', 60, false, false);
+  assert.equal(stressed.prefetch, false);
+  assert.ok(stressed.error > smooth.error);
+  assert.ok(stressed.maxTilesProcessed < smooth.maxTilesProcessed);
+  assert.equal(terrainStreamProfile('street', 60, false, true).prefetch, false);
+  assert.ok(terrainStreamProfile('street', 60, true).cacheBytes <= 300e6);
 });
 const pose = {t:'pose',lat:52,lon:16,h:400,heading:0,pitch:0,roll:0,seq:2,at:1200,plane:'pa28'};
 test('multiplayer rejects forged host commands, malformed poses and unsafe object keys', () => {

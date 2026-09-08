@@ -31,7 +31,7 @@ Na telefonie użyj drążka dotykowego. W multiplayer wyślij znajomemu link do 
 
 W karuzeli pojazdów wybierz **Parachutist**. Stabilny, segmentowy model pilota ma osobne pozy dla lotu i marszu, bez podatnej na deformacje siatki szkieletowej. Czasza leci z prędkością około 24–55 km/h: `A/D` steruje zakrętem, `S` zwiększa opadanie i jednocześnie zmniejsza prędkość poziomą, a `W` przywraca szybszą charakterystykę trymową. Tuż nad powierzchnią działa automatyczne wyhamowanie opadania ułatwiające przyziemienie. Maksymalne przybliżenie kółkiem myszy przełącza widok pierwszoosobowy z animowanymi rękami i linkami sterowniczymi. Przyziemienie na rozpoznanej powierzchni ulicy lub płaskiego dachu jest bezpieczne i automatycznie przełącza postać na chodzenie ze stałą prędkością 9 km/h. Na ziemi `W/S` porusza postać, a `A/D` obraca. Zejście z wysokiej krawędzi ponownie otwiera czaszę. `Spacja` lub przycisk **Gentle takeoff** rozpoczyna łagodne wznoszenie o około 12 m, które można od razu przerwać klawiszem `S`. `R` uruchamia szybkie wznoszenie o około 80 m.
 
-Podczas zejścia poniżej 240 m gra zaczyna wcześniej pobierać dokładniejsze kafelki. Po lądowaniu dodatkowa kamera od razu uzupełnia otoczenie w czterech kierunkach, a profil naziemny zachowuje pobrane kafle dłużej i utrzymuje postać 32 cm nad zmieniającą się powierzchnią LOD. Tekstury używają maksymalnej dostępnej anizotropii do 16×.
+Podczas zejścia poniżej 240 m gra zaczyna wcześniej pobierać dokładniejsze kafelki. Po lądowaniu renderer najpierw wyostrza obszar widoczny przed graczem, a potem jedną lekką kamerą stopniowo uzupełnia pozostałe kierunki. Gdy liczba klatek spada albo pamięć podręczna jest pełna, pobieranie tła zatrzymuje się automatycznie. Tekstury zachowują mipmapy i używają maksymalnej dostępnej anizotropii do 16×, dzięki czemu dachy i elewacje oglądane pod kątem pozostają czytelniejsze.
 
 Po lądowaniu przycisk **Enter Street View** najpierw wyjaśnia, że na dachu panorama może zacząć się na najbliższej ulicy. Gra otwiera bezkluczowy adres Google Maps w osobnym oknie i zachowuje ekran powrotu; po powrocie do okna gry `Esc` lub `Spacja` zamyka Street View i wznawia lot z zachowanego miejsca. Rozwiązanie nie korzysta z Maps JavaScript API i nie nalicza opłat za wywołania API. Ograniczenia bezpieczeństwa przeglądarki uniemożliwiają odczyt pozycji z osobnej strony, dlatego spacer wykonany w Google Maps nie zmienia miejsca postaci w grze.
 
@@ -39,7 +39,7 @@ Po lądowaniu przycisk **Enter Street View** najpierw wyjaśnia, że na dachu pa
 
 Gra używa jednego profilu **Adaptive high detail** zamiast osobnego trybu 4K. Bufor obrazu może osiągnąć 2560 × 1440, a adaptacja zmniejsza rozdzielczość przy spadkach FPS i przywraca ją, gdy urządzenie znów nadąża. Budżet GPU jest kierowany przede wszystkim na dokładniejsze kafelki terenu w pobliżu postaci.
 
-Szczegóły map doczytują się przez Internet. Rozdzielczość obrazu nie zwiększa dokładności źródłowej fotogrametrii; jakość i płynność zależą od zasięgu danych, połączenia oraz GPU. Fizyka pozostaje uproszczonym modelem gry.
+Szczegóły map doczytują się przez Internet. Gra używa Google Photorealistic 3D Tiles przez asset Cesium ion `2275207`; nie wymaga klucza Google Maps API. Rozdzielczość obrazu nie zwiększa dokładności źródłowej fotogrametrii, więc nie każda elewacja może osiągnąć jakość Street View. Jakość i płynność zależą od zasięgu danych, połączenia oraz GPU. Fizyka pozostaje uproszczonym modelem gry.
 
 ## Informacje techniczne
 
