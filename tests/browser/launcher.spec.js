@@ -108,6 +108,13 @@ test('rocket launch keeps a close chase camera and darkens the upper atmosphere'
   await expect.poll(() => page.evaluate(() => window.__dbg?.skySpaceBlend)).toBeGreaterThan(0);
 });
 
+test('rocket launch has the faster ascent profile', async ({page}) => {
+  await page.goto('/');
+  await expect.poll(() => page.evaluate(() => !!window.__game)).toBe(true);
+  expect(await page.evaluate(() => window.__testRocketLaunch(1000, null))).toBe(true);
+  await expect.poll(() => page.evaluate(() => window.__dbg?.rocketLaunchVelocity)).toBeGreaterThanOrEqual(225);
+});
+
 test('space environments support reentry, planetary surface flight and the black-hole farm return', async ({page}) => {
   test.setTimeout(30000);
   await page.goto('/');
@@ -126,6 +133,8 @@ test('space environments support reentry, planetary surface flight and the black
 
   await page.locator('#space-enter').click();
   await expect.poll(() => page.evaluate(() => window.__dbg?.earthReentry)).toBe(true);
+  await expect.poll(() => page.evaluate(() => window.__dbg?.camDist)).toBeLessThan(18);
+  await expect.poll(() => page.evaluate(() => window.__dbg?.skySpaceBlend)).toBeGreaterThan(0.9);
   await expect(page.locator('#space-nav')).toBeHidden();
   await page.evaluate(() => { window.__game.plane.height = window.__dbg.groundAlt + 6001; });
   await expect.poll(() => page.evaluate(() => window.__dbg?.earthReentry)).toBe(false);
@@ -140,6 +149,7 @@ test('space environments support reentry, planetary surface flight and the black
 
   expect(await page.evaluate(() => window.__testSpaceApproach('Galactic Core', 4000, 92))).toBe(true);
   await expect.poll(() => page.evaluate(() => window.__dbg?.blackHoleGravity?.intensity || 0)).toBeGreaterThan(0.35);
+  await expect(page.locator('body')).toHaveClass(/black-hole-gravity/);
   await expect.poll(() => page.evaluate(() => window.__dbg?.music?.blackHole?.proximity || 0)).toBeGreaterThan(0.4);
   expect(await page.evaluate(() => window.__testSpaceApproach('Galactic Core', -1, 60))).toBe(true);
   await expect(page.locator('#interstellar')).toHaveClass(/show/);

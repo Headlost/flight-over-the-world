@@ -6,6 +6,7 @@ const blackHoleScore = document.getElementById("black-hole-score");
 let lastRetry = 0;
 let blackHoleProximity = 0;
 let blackHoleTransit = false;
+let blackHoleTransitProgress = 0;
 let resetScoreWhenSilent = false;
 
 if (background) {
@@ -43,6 +44,7 @@ export function setBlackHoleProximity(value) {
 export function startBlackHoleFinale(totalSeconds = 35) {
   if (!blackHoleScore) return;
   blackHoleTransit = true;
+  blackHoleTransitProgress = 0;
   blackHoleProximity = 1;
   resetScoreWhenSilent = false;
   const cueFinale = () => {
@@ -58,17 +60,21 @@ export function startBlackHoleFinale(totalSeconds = 35) {
   playBlackHoleScore();
 }
 
+export function setBlackHoleTransitProgress(value) {
+  blackHoleTransitProgress = Math.max(0, Math.min(1, Number(value) || 0));
+}
+
 export function stopBlackHoleScore() {
   blackHoleTransit = false;
+  blackHoleTransitProgress = 0;
   blackHoleProximity = 0;
   resetScoreWhenSilent = true;
 }
 
 export function updateMusic() {
-  const scoreTarget = BLACK_HOLE_GAIN * Math.max(
-    blackHoleTransit ? 1 : 0,
-    Math.pow(blackHoleProximity, 0.72),
-  );
+  const scoreTarget = BLACK_HOLE_GAIN * (blackHoleTransit
+    ? 1 + blackHoleTransitProgress * 0.28
+    : Math.pow(blackHoleProximity, 0.68));
   if (blackHoleScore) {
     blackHoleScore.volume = approach(blackHoleScore.volume, scoreTarget, scoreTarget > blackHoleScore.volume ? 5.4 : 2.2);
     if (scoreTarget > 0.008 && blackHoleScore.paused) playBlackHoleScore();
@@ -106,6 +112,7 @@ export function musicDebug() {
       gain: Math.round(blackHoleScore.volume * 1000) / 1000,
       proximity: Math.round(blackHoleProximity * 1000) / 1000,
       transit: blackHoleTransit,
+      transitProgress: Math.round(blackHoleTransitProgress * 1000) / 1000,
     } : null,
   };
 }

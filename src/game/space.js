@@ -48,8 +48,8 @@ export const SPACE_BODIES = Object.freeze([
     color: "#000000",
     hazard: "blackhole",
     diskOuter: 690,
-    gravityRange: 7600,
-    musicRange: 9500,
+    gravityRange: 9000,
+    musicRange: 14000,
   },
 ]);
 
@@ -191,7 +191,7 @@ export class SpaceFlightController {
     if (intensity <= 0) return { centerDistance, surfaceDistance, intensity, trapped };
 
     toCenter.multiplyScalar(1 / centerDistance);
-    const acceleration = (8 + intensity * intensity * 310) * (trapped ? 2.15 : 1);
+    const acceleration = (12 + Math.pow(intensity, 1.72) * 500) * (trapped ? 2.5 : 1);
     scratchVelocity.copy(this.forward).multiplyScalar(this.speed).addScaledVector(toCenter, acceleration * dt);
     this.speed = clamp(scratchVelocity.length(), 0, this.hyperSpeed * 1.35);
     if (this.speed > 1e-4) this.forward.copy(scratchVelocity).multiplyScalar(1 / this.speed);

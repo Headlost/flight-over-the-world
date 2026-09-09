@@ -69,6 +69,7 @@ import {
   primeMusic,
   musicDebug,
   setBlackHoleProximity,
+  setBlackHoleTransitProgress,
   startBlackHoleFinale,
   stopBlackHoleScore,
 } from "./game/music.js";
@@ -290,9 +291,12 @@ let spaceEntryVisualTimer = null;
 let blackHoleSequence = false;
 let blackHoleTimer = null;
 let blackHolePhaseTimer = null;
+let blackHoleEntryTimer = null;
+let blackHoleCountdownDelayTimer = null;
 let blackHoleCountdownTimer = null;
 let blackHolePhase = "idle";
 let blackHoleGravity = null;
+let blackHoleTesseractStartedAt = 0;
 let tesseractTransit = null;
 let interstellarArrivalPending = false;
 let interstellarArrivalStartedAt = 0;
@@ -307,10 +311,16 @@ const isMobile =
   typeof navigator !== "undefined" &&
   (/iPhone|iPad|iPod|Android/i.test(navigator.userAgent) ||
     (navigator.maxTouchPoints > 1 && matchMedia("(pointer: coarse)").matches));
-const BLACK_HOLE_VOID_MS = navigator.webdriver ? 350 : 3200;
-const BLACK_HOLE_TESSERACT_MS = navigator.webdriver ? 450 : 11800;
+const BLACK_HOLE_VOID_MS = navigator.webdriver ? 250 : 10000;
+const BLACK_HOLE_APPROACH_MS = navigator.webdriver ? 300 : 5000;
+const BLACK_HOLE_TESSERACT_MS = navigator.webdriver ? 450 : 15000;
+const BLACK_HOLE_COUNTDOWN_DELAY_MS = navigator.webdriver ? 40 : 3000;
+const BLACK_HOLE_ENTRY_MS = BLACK_HOLE_VOID_MS + BLACK_HOLE_APPROACH_MS;
 const EARTH_EXPOSURE = 1.1;
 const SPACE_EXPOSURE = 1.14;
+const EARTH_CLEAR_COLOR = new Color(0x8ec8e8);
+const EARTH_FOG_COLOR = new Color(0x9dd0ea);
+const UPPER_ATMOSPHERE_COLOR = new Color(0x01030a);
 const PLANET_ENTRY_FX_MS = navigator.webdriver ? 450 : 2600;
 const FARM_SNAP_TIMEOUT_MS = navigator.webdriver ? 800 : 8000;
 const COOPER_FARM = Object.freeze({
@@ -2585,7 +2595,7 @@ function startRocketLaunch() {
     setSpaceNotice("Orbital flight is available in single-player Free flight.", 4200);
     return;
   }
-  rocketLaunch = { velocity: Math.max(150, plane.speed), startedAt: performance.now() };
+  rocketLaunch = { velocity: Math.max(225, plane.speed * 1.5), startedAt: performance.now() };
   cooperFarmRocketReady = false;
   hideCooperFarmArrival();
   pendingSnap = false;
@@ -2747,6 +2757,11 @@ function finishInterstellarJump() {
   if (!spaceModeActive || !blackHoleSequence) return;
   tesseractTransit?.stop();
   blackHoleTimer = null;
+  blackHolePhaseTimer = null;
+  blackHoleEntryTimer = null;
+  blackHoleCountdownDelayTimer = null;
+  blackHoleCountdownTimer = null;
+  blackHoleTesseractStartedAt = 0;
   blackHoleSequence = false;
   blackHolePhase = "arrival";
   stopBlackHoleScore();
@@ -2790,32 +2805,42 @@ function triggerInterstellarJump() {
   el.interstellar?.classList.remove("tesseract-phase");
   el.interstellar?.classList.add("show");
   el.interstellar?.setAttribute("aria-hidden", "false");
-  el.transitCountdown?.setAttribute("aria-hidden", "false");
+  el.transitCountdown?.setAttribute("aria-hidden", "true");
   if (el.transitStatus) el.transitStatus.textContent = "EVENT HORIZON · TELEMETRY LOST";
   const transitStartedAt = performance.now();
   if (!tesseractTransit && el.tesseractCanvas) tesseractTransit = new TesseractTransit(el.tesseractCanvas);
-  tesseractTransit?.start(transitStartedAt, "approach");
+  tesseractTransit?.start(transitStartedAt, "void", BLACK_HOLE_VOID_MS);
   const updateCountdown = () => {
-    if (!el.transitCountdown || blackHolePhase !== "void") return;
-    const remaining = Math.max(1, Math.ceil((BLACK_HOLE_VOID_MS - (performance.now() - transitStartedAt)) / 1000));
+    if (!el.transitCountdown || !["void", "approach"].includes(blackHolePhase)) return;
+    const remaining = Math.max(1, Math.ceil((BLACK_HOLE_ENTRY_MS - (performance.now() - transitStartedAt)) / 1000));
     const value = el.transitCountdown.querySelector("strong");
     if (value) value.textContent = String(remaining).padStart(2, "0");
   };
-  updateCountdown();
-  if (blackHoleCountdownTimer) clearInterval(blackHoleCountdownTimer);
-  blackHoleCountdownTimer = setInterval(updateCountdown, 100);
-  startBlackHoleFinale((BLACK_HOLE_VOID_MS + BLACK_HOLE_TESSERACT_MS) / 1000);
+  blackHoleCountdownDelayTimer = setTimeout(() => {
+    el.transitCountdown?.setAttribute("aria-hidden", "false");
+    updateCountdown();
+    blackHoleCountdownTimer = setInterval(updateCountdown, 100);
+    blackHoleCountdownDelayTimer = null;
+  }, BLACK_HOLE_COUNTDOWN_DELAY_MS);
+  startBlackHoleFinale((BLACK_HOLE_ENTRY_MS + BLACK_HOLE_TESSERACT_MS) / 1000);
   blackHolePhaseTimer = setTimeout(() => {
+    blackHolePhase = "approach";
+    tesseractTransit?.setPhase("approach", performance.now(), BLACK_HOLE_APPROACH_MS);
+    if (el.transitStatus) el.transitStatus.textContent = "UNKNOWN STRUCTURE · RAPID APPROACH";
+    blackHolePhaseTimer = null;
+  }, BLACK_HOLE_VOID_MS);
+  blackHoleEntryTimer = setTimeout(() => {
     blackHolePhase = "tesseract";
+    blackHoleTesseractStartedAt = performance.now();
     if (blackHoleCountdownTimer) clearInterval(blackHoleCountdownTimer);
     blackHoleCountdownTimer = null;
     el.interstellar?.classList.add("tesseract-phase");
-    tesseractTransit?.setPhase("transit");
+    tesseractTransit?.setPhase("transit", blackHoleTesseractStartedAt, BLACK_HOLE_TESSERACT_MS);
     el.transitCountdown?.setAttribute("aria-hidden", "true");
     if (el.transitStatus) el.transitStatus.textContent = "GRAVITATIONAL TESSERACT · TEMPORAL ECHOES";
-    blackHolePhaseTimer = null;
-  }, BLACK_HOLE_VOID_MS);
-  blackHoleTimer = setTimeout(finishInterstellarJump, BLACK_HOLE_VOID_MS + BLACK_HOLE_TESSERACT_MS);
+    blackHoleEntryTimer = null;
+  }, BLACK_HOLE_ENTRY_MS);
+  blackHoleTimer = setTimeout(finishInterstellarJump, BLACK_HOLE_ENTRY_MS + BLACK_HOLE_TESSERACT_MS);
 }
 
 function checkSpaceEnvironment(dt) {
@@ -2885,7 +2910,7 @@ function checkSpaceEnvironment(dt) {
 
 function updateRocketLaunch(dt) {
   if (!rocketLaunch || !plane) return;
-  rocketLaunch.velocity = Math.min(8600, rocketLaunch.velocity + 1350 * dt);
+  rocketLaunch.velocity = Math.min(12900, rocketLaunch.velocity + 2025 * dt);
   plane.speed = rocketLaunch.velocity;
   plane.throttle = 1;
   plane.pitch += (Math.PI / 2 - plane.pitch) * (1 - Math.exp(-8 * dt));
@@ -2955,12 +2980,17 @@ function leaveSpaceFlight() {
   blackHoleSequence = false;
   if (blackHoleTimer) clearTimeout(blackHoleTimer);
   if (blackHolePhaseTimer) clearTimeout(blackHolePhaseTimer);
+  if (blackHoleEntryTimer) clearTimeout(blackHoleEntryTimer);
+  if (blackHoleCountdownDelayTimer) clearTimeout(blackHoleCountdownDelayTimer);
   if (blackHoleCountdownTimer) clearInterval(blackHoleCountdownTimer);
   blackHoleTimer = null;
   blackHolePhaseTimer = null;
+  blackHoleEntryTimer = null;
+  blackHoleCountdownDelayTimer = null;
   blackHoleCountdownTimer = null;
   blackHolePhase = "idle";
   blackHoleGravity = null;
+  blackHoleTesseractStartedAt = 0;
   tesseractTransit?.stop();
   interstellarArrivalPending = false;
   interstellarArrivalStartedAt = 0;
@@ -3023,7 +3053,13 @@ function renderSpaceCredits() {
 }
 
 function tickSpaceFrame(dt, rawDt, flying) {
-  if (blackHoleSequence) tesseractTransit?.render(performance.now());
+  if (blackHoleSequence) {
+    const transitNow = performance.now();
+    tesseractTransit?.render(transitNow);
+    setBlackHoleTransitProgress(blackHolePhase === "tesseract"
+      ? Math.max(0, Math.min(1, (transitNow - blackHoleTesseractStartedAt) / BLACK_HOLE_TESSERACT_MS))
+      : 0);
+  }
   const spaceCanMove = flying && !spaceLandedBody && !blackHoleSequence;
   if (spaceCanMove) {
     spaceCtrl.roll = ctrl.roll;
@@ -3098,7 +3134,9 @@ function tickSpaceFrame(dt, rawDt, flying) {
 
   const nearest = spaceFlight.nearestBody();
   const orbitLabel = blackHoleSequence
-    ? blackHolePhase === "tesseract" ? "GRAVITATIONAL TESSERACT" : "BEYOND THE EVENT HORIZON"
+    ? blackHolePhase === "tesseract"
+      ? "GRAVITATIONAL TESSERACT"
+      : blackHolePhase === "approach" ? "TESSERACT APPROACH" : "BEYOND THE EVENT HORIZON"
     : spaceLandedBody
       ? `Landed: ${spaceLandedBody}`
       : spaceFlight.surfaceBody
@@ -3146,6 +3184,7 @@ function tickSpaceFrame(dt, rawDt, flying) {
     blackHolePhase,
     blackHoleGravity: blackHoleGravity ? { ...blackHoleGravity } : null,
     selectedPlane,
+    planeMeshKey: planeMesh?.userData?.key || "",
     music: musicDebug(),
     spaceCameraDistance: camera.position.distanceTo(spaceFlight.position),
     spaceCameraOrbit: { yaw: orbit.yaw, pitch: orbit.pitch, zoom: orbit.zoom },
@@ -3576,15 +3615,16 @@ function tickFrame() {
   setParachutistFirstPerson(planeMesh, firstPerson);
   const cameraProfile = rocketLaunch
     ? [0, 3.1, 10.5]
+    : earthReentry ? [0, 4.3, 15]
     : selectedPlane === "parachutist" && plane.state === "grounded" ? [0, 2.4, 5.5] : camOffset;
   if (firstPerson) {
     offset.set(0, 1.58, 0.08).applyQuaternion(camFrameQuat).add(planePos);
     camPos.copy(offset);
   } else {
-    const cameraZoom = rocketLaunch ? Math.min(1, orbit.zoom) : orbit.zoom;
+    const cameraZoom = rocketLaunch ? Math.min(1, orbit.zoom) : earthReentry ? Math.min(1.08, orbit.zoom) : orbit.zoom;
     const radius = Math.hypot(cameraProfile[1], cameraProfile[2]) * cameraZoom;
     offset.set(Math.sin(orbit.yaw) * Math.cos(orbit.pitch) * radius, Math.sin(orbit.pitch) * radius, Math.cos(orbit.yaw) * Math.cos(orbit.pitch) * radius).applyQuaternion(camFrameQuat).add(planePos);
-    if (!camInit || rocketLaunch) camPos.copy(offset);
+    if (!camInit || rocketLaunch || earthReentry) camPos.copy(offset);
     else camPos.lerp(offset, 1 - Math.exp(-12 * dt));
   }
   camInit = true;
@@ -3632,8 +3672,15 @@ function tickFrame() {
   sky.mesh.quaternion.copy(skyQuat);
   sky.uniforms.uTime.value = clock.elapsedTime;
   const launchAltitude = rocketLaunch || earthReentry ? Math.max(0, plane.height - groundAlt) : 0;
-  const atmosphereFade = Math.max(0, Math.min(1, (launchAltitude - 8500) / 83500));
-  sky.uniforms.uSpaceBlend.value = atmosphereFade * atmosphereFade * (3 - 2 * atmosphereFade);
+  const atmosphereFade = Math.max(0, Math.min(1, (launchAltitude - 1500) / 82000));
+  const skySpaceBlend = atmosphereFade * atmosphereFade * (3 - 2 * atmosphereFade);
+  sky.uniforms.uSpaceBlend.value = skySpaceBlend;
+  if (scene.fog === earthFog && scene.background?.isColor) {
+    scene.background.copy(EARTH_CLEAR_COLOR).lerp(UPPER_ATMOSPHERE_COLOR, skySpaceBlend);
+    earthFog.color.copy(EARTH_FOG_COLOR).lerp(UPPER_ATMOSPHERE_COLOR, skySpaceBlend);
+    earthFog.density = 0.00007 * (1 - skySpaceBlend * 0.9);
+    renderer.setClearColor(scene.background);
+  }
 
   offset.copy(SUN_DIR).applyQuaternion(skyQuat);
   sun.position.copy(offset).multiplyScalar(700).add(planePos);
@@ -3830,6 +3877,7 @@ function tickFrame() {
     lon: plane.lonDeg,
     mode,
     selectedPlane,
+    planeMeshKey: planeMesh?.userData?.key || "",
     interstellarArrivalPending,
     cooperFarmRocketReady,
     timeLeft,
@@ -3857,6 +3905,7 @@ function tickFrame() {
     measuredFps: adaptiveQuality.lastFps,
     terrainCacheFull: tiles.lruCache.isFull(),
     rocketLaunch: !!rocketLaunch,
+    rocketLaunchVelocity: rocketLaunch?.velocity ?? 0,
     skySpaceBlend: sky?.uniforms?.uSpaceBlend?.value ?? 0,
     toneMappingExposure: renderer?.toneMappingExposure ?? 0,
     earthReentry: !!earthReentry,
@@ -3883,7 +3932,7 @@ window.__forceTestMate = () => {
   mp.goAt = performance.now();
 };
 
-window.__testRocketLaunch = (height = 99980) => {
+window.__testRocketLaunch = (height = 99980, testVelocity = 1200) => {
   if (!navigator.webdriver) return false;
   const rocketIndex = PLANE_ORDER.indexOf("rocket");
   selectMode("free");
@@ -3903,7 +3952,7 @@ window.__testRocketLaunch = (height = 99980) => {
   el.lobby.classList.add("hidden");
   plane.height = Number.isFinite(height) ? height : 99980;
   startRocketLaunch();
-  if (rocketLaunch) rocketLaunch.velocity = 1200;
+  if (rocketLaunch && Number.isFinite(testVelocity)) rocketLaunch.velocity = testVelocity;
   return !!rocketLaunch;
 };
 

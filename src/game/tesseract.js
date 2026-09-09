@@ -39,6 +39,7 @@ export class TesseractTransit {
     this.reducedMotion = globalThis.matchMedia?.("(prefers-reduced-motion: reduce)")?.matches || false;
     this.phase = "idle";
     this.phaseStartedAt = 0;
+    this.phaseDurationMs = 1000;
     this.viewYaw = 0;
     this.viewPitch = 0;
     this.targetYaw = 0;
@@ -64,11 +65,12 @@ export class TesseractTransit {
     this.canvas?.addEventListener("pointercancel", this.onPointerUp);
   }
 
-  start(now = performance.now(), phase = "approach") {
+  start(now = performance.now(), phase = "approach", durationMs = 1000) {
     this.active = true;
     this.startedAt = now;
     this.phaseStartedAt = now;
     this.phase = phase;
+    this.phaseDurationMs = Math.max(1, durationMs);
     this.viewYaw = 0;
     this.viewPitch = 0;
     this.targetYaw = 0;
@@ -77,9 +79,10 @@ export class TesseractTransit {
     this.render(now);
   }
 
-  setPhase(phase, now = performance.now()) {
+  setPhase(phase, now = performance.now(), durationMs = 1000) {
     this.phase = phase;
     this.phaseStartedAt = now;
+    this.phaseDurationMs = Math.max(1, durationMs);
   }
 
   stop() {
@@ -335,7 +338,7 @@ export class TesseractTransit {
     const width = this.width;
     const height = this.height;
     const age = Math.max(0, (now - this.phaseStartedAt) / 1000);
-    const duration = this.reducedMotion ? 1.6 : 3.2;
+    const duration = Math.max(0.1, this.phaseDurationMs / 1000);
     const progress = clamp(age / duration, 0, 1);
     const eased = progress * progress * (3 - 2 * progress);
     const cx = width * 0.5 + Math.sin(age * 2.1) * width * 0.006 * (1 - eased);
@@ -373,9 +376,49 @@ export class TesseractTransit {
     }
   }
 
+  drawVoid(now) {
+    const ctx = this.ctx;
+    const width = this.width;
+    const height = this.height;
+    const age = Math.max(0, (now - this.phaseStartedAt) / 1000);
+    const cx = width * 0.5 + Math.sin(age * 0.37) * width * 0.014;
+    const cy = height * 0.5 + Math.cos(age * 0.29) * height * 0.012;
+    ctx.setTransform(this.dpr, 0, 0, this.dpr, 0, 0);
+    ctx.fillStyle = "#000";
+    ctx.fillRect(0, 0, width, height);
+
+    const pulse = 0.5 + 0.5 * Math.sin(age * 0.9);
+    const radius = Math.min(width, height) * (0.035 + pulse * 0.012);
+    const lens = ctx.createRadialGradient(cx, cy, 0, cx, cy, radius * 6.5);
+    lens.addColorStop(0, "rgba(0,0,0,1)");
+    lens.addColorStop(0.38, "rgba(0,0,0,1)");
+    lens.addColorStop(0.46, "rgba(95,128,155,.09)");
+    lens.addColorStop(0.5, "rgba(224,233,238,.055)");
+    lens.addColorStop(0.58, "rgba(0,0,0,1)");
+    lens.addColorStop(1, "rgba(0,0,0,1)");
+    ctx.fillStyle = lens;
+    ctx.fillRect(0, 0, width, height);
+
+    ctx.strokeStyle = "rgba(184, 205, 220, .075)";
+    ctx.lineWidth = 0.7;
+    for (let i = 0; i < 24; i++) {
+      const angle = i / 24 * TAU + age * 0.025;
+      const inner = radius * (1.8 + (i % 3) * 0.45);
+      const outer = Math.max(width, height) * (0.55 + (i % 5) * 0.05);
+      ctx.beginPath();
+      ctx.moveTo(cx + Math.cos(angle) * inner, cy + Math.sin(angle) * inner);
+      ctx.lineTo(cx + Math.cos(angle + 0.015) * outer, cy + Math.sin(angle + 0.015) * outer);
+      ctx.stroke();
+    }
+  }
+
   render(now = performance.now()) {
     if (!this.active || !this.ctx) return;
     this.resize();
+    if (this.phase === "void") {
+      this.drawVoid(now);
+      return;
+    }
     if (this.phase === "approach") {
       this.drawApproach(now);
       return;
