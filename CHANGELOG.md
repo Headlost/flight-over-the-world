@@ -9,7 +9,7 @@ Wersja 1.0 była punktem startowym zaimportowanym jako fork wcześniejszego proj
 - dodano tryb spadochroniarza: stabilny model, sterowanie opadaniem, bezpieczne lądowanie na ulicach i dachach, chodzenie, widok pierwszoosobowy oraz dwa sposoby ponownego startu;
 - dodano rakietę: pionowy start, orbitę Ziemi, sterowanie w przestrzeni, hiperprędkość, planety, atmosfery i powrót na Ziemię;
 - dodano loty nad teksturowanymi powierzchniami Merkurego, Wenus, Księżyca i Marsa;
-- dodano Drogę Mleczną, relatywistycznie renderowaną czarną dziurę, grawitację, dysk akrecyjny, odliczanie po przekroczeniu horyzontu oraz tesserakt;
+- dodano Drogę Mleczną, relatywistycznie renderowaną czarną dziurę, grawitację, dysk akrecyjny, odliczanie po przekroczeniu horyzontu oraz 15-sekundowy przelot przez interaktywny teserakt z widokiem 360°;
 - zakończenie czarnej dziury prowadzi rakietę na farmę Coopera, udostępnia bezkluczowy odnośnik do referencyjnego widoku i pozwala wystartować ponownie;
 - usunięto z interfejsu Guess the region, Fly home i wybór Poland/Europe/World;
 - zastąpiono profile jakości jednym adaptacyjnym profilem wysokiej szczegółowości;

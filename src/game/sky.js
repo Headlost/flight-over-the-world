@@ -14,6 +14,7 @@ export function createSky(fogColorHex, { simple = false } = {}) {
     uSunDir: { value: SUN_DIR },
     uSunColor: { value: new Color(0xfff2dd) },
     uTime: { value: 0 },
+    uSpaceBlend: { value: 0 },
   };
 
   const mat = new ShaderMaterial({
@@ -36,6 +37,7 @@ export function createSky(fogColorHex, { simple = false } = {}) {
       uniform vec3 uSunDir;
       uniform vec3 uSunColor;
       uniform float uTime;
+      uniform float uSpaceBlend;
 
       ${simple ? "" : `
       float hash(vec2 p) {
@@ -90,6 +92,12 @@ export function createSky(fogColorHex, { simple = false } = {}) {
           col = mix(col, cloud, cov * fade * 0.85);
         }
         `}
+
+        // The atmosphere thins continuously during a rocket ascent. Keeping
+        // this inside the sky shader avoids a hard blue-to-black cut at orbit.
+        vec3 upperAtmosphere = vec3(0.004, 0.009, 0.026);
+        col = mix(col, upperAtmosphere, smoothstep(0.0, 1.0, uSpaceBlend));
+        col += uSunColor * pow(s, 900.0) * uSpaceBlend * 2.2;
 
         gl_FragColor = vec4(col, 1.0);
         #include <tonemapping_fragment>

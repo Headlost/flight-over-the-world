@@ -62,6 +62,16 @@ test('rocket launcher advertises orbital controls and exposes every destination'
   await expect(page.locator('body')).toHaveClass(/rocket-selected/);
 });
 
+test('Street View return control stays above the panorama layer', async ({page}) => {
+  await page.goto('/');
+  const layers = await page.evaluate(() => ({
+    panorama: Number(getComputedStyle(document.querySelector('#streetview')).zIndex),
+    controls: Number(getComputedStyle(document.querySelector('.street-mode-hud')).zIndex),
+  }));
+  expect(layers.controls).toBeGreaterThan(layers.panorama);
+  await expect(page.locator('#street-return')).toContainText('Return to game');
+});
+
 test('rocket crosses into orbit, selects Mars and engages hyperdrive', async ({page}) => {
   test.setTimeout(30000);
   await page.goto('/');
@@ -87,6 +97,15 @@ test('rocket crosses into orbit, selects Mars and engages hyperdrive', async ({p
   await expect.poll(() => page.evaluate(() => window.__dbg?.spaceCameraOrbit?.yaw)).not.toBeCloseTo(cameraBefore.yaw, 2);
   await page.mouse.wheel(0, 420);
   await expect.poll(() => page.evaluate(() => window.__dbg?.spaceCameraOrbit?.zoom)).toBeGreaterThan(cameraBefore.zoom);
+});
+
+test('rocket launch keeps a close chase camera and darkens the upper atmosphere', async ({page}) => {
+  await page.goto('/');
+  await expect.poll(() => page.evaluate(() => !!window.__game)).toBe(true);
+  expect(await page.evaluate(() => window.__testRocketLaunch(20000))).toBe(true);
+  await expect.poll(() => page.evaluate(() => window.__dbg?.rocketLaunch)).toBe(true);
+  await expect.poll(() => page.evaluate(() => window.__dbg?.camDist)).toBeLessThan(13);
+  await expect.poll(() => page.evaluate(() => window.__dbg?.skySpaceBlend)).toBeGreaterThan(0);
 });
 
 test('space environments support reentry, planetary surface flight and the black-hole farm return', async ({page}) => {
@@ -127,6 +146,8 @@ test('space environments support reentry, planetary surface flight and the black
   await expect(page.locator('#transit-status')).toContainText('EVENT HORIZON');
   await expect(page.locator('#transit-countdown strong')).toHaveText(/\d{2}/);
   await expect(page.locator('#interstellar')).toHaveClass(/tesseract-phase/, {timeout:3000});
+  await expect(page.locator('#tesseract-canvas')).toBeVisible();
+  expect(await page.locator('#tesseract-canvas').evaluate(canvas => canvas.width > 0 && canvas.height > 0)).toBe(true);
   await expect.poll(() => page.evaluate(() => window.__dbg?.spaceMode), {timeout:7000}).toBe(false);
   await expect.poll(() => page.evaluate(() => window.__dbg?.selectedPlane)).toBe('rocket');
   await expect.poll(() => page.evaluate(() => window.__dbg?.cooperFarmRocketReady), {timeout:7000}).toBe(true);

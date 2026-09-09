@@ -211,16 +211,13 @@
     <section id="interstellar" aria-live="assertive" aria-hidden="true">
       <div class="event-horizon-void" aria-hidden="true"></div>
       <div class="tesseract" aria-hidden="true">
-        <div class="tesseract-core"><i></i><i></i><i></i></div>
-        <div class="tesseract-rings"><i></i><i></i><i></i></div>
-        <div class="tesseract-shelves">
-          <i></i><i></i><i></i><i></i><i></i><i></i>
-          <i></i><i></i><i></i><i></i><i></i><i></i>
+        <canvas id="tesseract-canvas"></canvas>
+        <div class="tesseract-reticle"><i></i><i></i><i></i><i></i></div>
+        <div class="tesseract-readout">
+          <span>SPACETIME VECTOR</span>
+          <strong>∞ / ∞ / ∞ / ∞</strong>
         </div>
-        <div class="tesseract-books">
-          <b></b><b></b><b></b><b></b><b></b><b></b>
-          <b></b><b></b><b></b><b></b><b></b><b></b>
-        </div>
+        <div class="tesseract-look-hint">DRAG TO LOOK · 360° STRUCTURE</div>
       </div>
       <div id="transit-countdown" class="transit-countdown" aria-hidden="true">
         <span>UNKNOWN STRUCTURE IN</span><strong>15</strong>
@@ -240,7 +237,7 @@
       <div class="street-mode-hud">
         <strong id="street-mode-title">Street View</strong>
         <span id="street-mode-status">Click and drag once, then use W/A/S/D to move and turn.</span>
-        <button id="street-return" type="button">Return to flight <kbd>Esc</kbd> / <kbd>Space</kbd></button>
+        <button id="street-return" type="button">← Return to game <kbd>Esc</kbd> / <kbd>Space</kbd></button>
       </div>
     </section>
 

@@ -74,6 +74,7 @@ import {
 } from "./game/music.js";
 import { streetViewUrl } from "./game/streetview.js";
 import { createSolarSystem, SPACE_BODIES, SpaceFlightController } from "./game/space.js";
+import { TesseractTransit } from "./game/tesseract.js";
 
 // rakieta stoi pionowo (+Y) — połóż ją nosem do przodu (-Z, konwencja lotu)
 function prepareRocket(model) {
@@ -292,6 +293,7 @@ let blackHolePhaseTimer = null;
 let blackHoleCountdownTimer = null;
 let blackHolePhase = "idle";
 let blackHoleGravity = null;
+let tesseractTransit = null;
 let interstellarArrivalPending = false;
 let interstellarArrivalStartedAt = 0;
 let cooperFarmRocketReady = false;
@@ -305,8 +307,10 @@ const isMobile =
   typeof navigator !== "undefined" &&
   (/iPhone|iPad|iPod|Android/i.test(navigator.userAgent) ||
     (navigator.maxTouchPoints > 1 && matchMedia("(pointer: coarse)").matches));
-const BLACK_HOLE_VOID_MS = navigator.webdriver ? 350 : 15000;
-const BLACK_HOLE_TESSERACT_MS = navigator.webdriver ? 450 : 20000;
+const BLACK_HOLE_VOID_MS = navigator.webdriver ? 350 : 3200;
+const BLACK_HOLE_TESSERACT_MS = navigator.webdriver ? 450 : 11800;
+const EARTH_EXPOSURE = 1.1;
+const SPACE_EXPOSURE = 1.14;
 const PLANET_ENTRY_FX_MS = navigator.webdriver ? 450 : 2600;
 const FARM_SNAP_TIMEOUT_MS = navigator.webdriver ? 800 : 8000;
 const COOPER_FARM = Object.freeze({
@@ -511,6 +515,7 @@ const el = {
   interstellar: document.getElementById("interstellar"),
   transitStatus: document.getElementById("transit-status"),
   transitCountdown: document.getElementById("transit-countdown"),
+  tesseractCanvas: document.getElementById("tesseract-canvas"),
   locationArrival: document.getElementById("location-arrival"),
   lobbyCarCanvas: document.getElementById("lobby-carousel-canvas"),
   lobbyCarPrev: document.getElementById("lobby-car-prev"),
@@ -1676,7 +1681,7 @@ function init() {
   applyPixelRatio();
   renderer.setSize(innerWidth, innerHeight);
   renderer.toneMapping = 4;
-  renderer.toneMappingExposure = 1.1;
+  renderer.toneMappingExposure = EARTH_EXPOSURE;
   renderer.shadowMap.enabled = QUALITY[settings.quality].shadows;
   renderer.shadowMap.type = 2; // PCFSoft
   renderer.domElement.id = "game-canvas";
@@ -2419,7 +2424,13 @@ window.addEventListener("keyup", (e) => {
   keys.delete(k);
 });
 window.addEventListener('blur', clearFlightInput);
-document.addEventListener('visibilitychange', () => { if (document.hidden) clearFlightInput(); });
+window.addEventListener('focus', () => {
+  if (streetModeActive && externalStreetWindow?.closed) leaveStreetView();
+});
+document.addEventListener('visibilitychange', () => {
+  if (document.hidden) clearFlightInput();
+  else if (streetModeActive && externalStreetWindow?.closed) leaveStreetView();
+});
 function clearFlightInput() {
   keys.clear(); ctrl.roll = 0; ctrl.pitch = 0; ctrl.throttle = 0;
   resetStick(); touch.boost = false; touch.brake = false; stopTalk();
@@ -2734,6 +2745,7 @@ function showCooperFarmArrival() {
 
 function finishInterstellarJump() {
   if (!spaceModeActive || !blackHoleSequence) return;
+  tesseractTransit?.stop();
   blackHoleTimer = null;
   blackHoleSequence = false;
   blackHolePhase = "arrival";
@@ -2781,6 +2793,8 @@ function triggerInterstellarJump() {
   el.transitCountdown?.setAttribute("aria-hidden", "false");
   if (el.transitStatus) el.transitStatus.textContent = "EVENT HORIZON · TELEMETRY LOST";
   const transitStartedAt = performance.now();
+  if (!tesseractTransit && el.tesseractCanvas) tesseractTransit = new TesseractTransit(el.tesseractCanvas);
+  tesseractTransit?.start(transitStartedAt, "approach");
   const updateCountdown = () => {
     if (!el.transitCountdown || blackHolePhase !== "void") return;
     const remaining = Math.max(1, Math.ceil((BLACK_HOLE_VOID_MS - (performance.now() - transitStartedAt)) / 1000));
@@ -2796,6 +2810,7 @@ function triggerInterstellarJump() {
     if (blackHoleCountdownTimer) clearInterval(blackHoleCountdownTimer);
     blackHoleCountdownTimer = null;
     el.interstellar?.classList.add("tesseract-phase");
+    tesseractTransit?.setPhase("transit");
     el.transitCountdown?.setAttribute("aria-hidden", "true");
     if (el.transitStatus) el.transitStatus.textContent = "GRAVITATIONAL TESSERACT · TEMPORAL ECHOES";
     blackHolePhaseTimer = null;
@@ -2910,6 +2925,7 @@ function enterSpaceFlight() {
   scene.fog = null;
   scene.background.setHex(0x01030a);
   renderer.setClearColor(0x01030a);
+  renderer.toneMappingExposure = SPACE_EXPOSURE;
   camera.near = 0.08;
   camera.far = 100000;
   camera.updateProjectionMatrix();
@@ -2945,6 +2961,7 @@ function leaveSpaceFlight() {
   blackHoleCountdownTimer = null;
   blackHolePhase = "idle";
   blackHoleGravity = null;
+  tesseractTransit?.stop();
   interstellarArrivalPending = false;
   interstellarArrivalStartedAt = 0;
   hidePlanetEntryVisual();
@@ -2965,7 +2982,10 @@ function leaveSpaceFlight() {
     scene.fog = earthFog;
     if (scene.background?.setHex) scene.background.setHex(0x8ec8e8);
   }
-  if (renderer) renderer.setClearColor(0x8ec8e8);
+  if (renderer) {
+    renderer.setClearColor(0x8ec8e8);
+    renderer.toneMappingExposure = EARTH_EXPOSURE;
+  }
   if (camera) {
     camera.near = 1;
     camera.far = 2e6;
@@ -3003,6 +3023,7 @@ function renderSpaceCredits() {
 }
 
 function tickSpaceFrame(dt, rawDt, flying) {
+  if (blackHoleSequence) tesseractTransit?.render(performance.now());
   const spaceCanMove = flying && !spaceLandedBody && !blackHoleSequence;
   if (spaceCanMove) {
     spaceCtrl.roll = ctrl.roll;
@@ -3213,8 +3234,8 @@ async function enterStreetView() {
   try { externalStreetWindow.opener = null; } catch { /* cross-origin protection */ }
   streetModeActive = true;
   keys.clear();
-  el.streetView.innerHTML = '<div class="street-external-card"><strong>Street View is open in another window</strong><span>Return to this game window, then press Escape or Space to close Street View and continue from the saved landing point.</span></div>';
-  el.streetModeStatus.textContent = "This no-key viewer preserves the landing point. Movement inside Google Maps cannot be transferred back to the game.";
+  el.streetView.innerHTML = '<div class="street-external-card"><strong>Street View is open in another window</strong><span>Close Google Maps or return here and use the visible Return to game button. Your landing point is preserved.</span></div>';
+  el.streetModeStatus.textContent = "Close Google Maps or tap Return to game. Escape and Space also work while this game tab is active.";
   el.streetMode.classList.add("open", "external");
   el.streetMode.setAttribute("aria-hidden", "false");
 }
@@ -3553,14 +3574,17 @@ function tickFrame() {
     updateFirstPersonArms(firstPersonRig, ctrl, dt, plane.state, plane.speed);
   }
   setParachutistFirstPerson(planeMesh, firstPerson);
-  const cameraProfile = selectedPlane === "parachutist" && plane.state === "grounded" ? [0, 2.4, 5.5] : camOffset;
+  const cameraProfile = rocketLaunch
+    ? [0, 3.1, 10.5]
+    : selectedPlane === "parachutist" && plane.state === "grounded" ? [0, 2.4, 5.5] : camOffset;
   if (firstPerson) {
     offset.set(0, 1.58, 0.08).applyQuaternion(camFrameQuat).add(planePos);
     camPos.copy(offset);
   } else {
-    const radius = Math.hypot(cameraProfile[1], cameraProfile[2]) * orbit.zoom;
+    const cameraZoom = rocketLaunch ? Math.min(1, orbit.zoom) : orbit.zoom;
+    const radius = Math.hypot(cameraProfile[1], cameraProfile[2]) * cameraZoom;
     offset.set(Math.sin(orbit.yaw) * Math.cos(orbit.pitch) * radius, Math.sin(orbit.pitch) * radius, Math.cos(orbit.yaw) * Math.cos(orbit.pitch) * radius).applyQuaternion(camFrameQuat).add(planePos);
-    if (!camInit) camPos.copy(offset);
+    if (!camInit || rocketLaunch) camPos.copy(offset);
     else camPos.lerp(offset, 1 - Math.exp(-12 * dt));
   }
   camInit = true;
@@ -3607,6 +3631,9 @@ function tickFrame() {
   sky.mesh.position.copy(camPos);
   sky.mesh.quaternion.copy(skyQuat);
   sky.uniforms.uTime.value = clock.elapsedTime;
+  const launchAltitude = rocketLaunch || earthReentry ? Math.max(0, plane.height - groundAlt) : 0;
+  const atmosphereFade = Math.max(0, Math.min(1, (launchAltitude - 8500) / 83500));
+  sky.uniforms.uSpaceBlend.value = atmosphereFade * atmosphereFade * (3 - 2 * atmosphereFade);
 
   offset.copy(SUN_DIR).applyQuaternion(skyQuat);
   sun.position.copy(offset).multiplyScalar(700).add(planePos);
@@ -3830,6 +3857,8 @@ function tickFrame() {
     measuredFps: adaptiveQuality.lastFps,
     terrainCacheFull: tiles.lruCache.isFull(),
     rocketLaunch: !!rocketLaunch,
+    skySpaceBlend: sky?.uniforms?.uSpaceBlend?.value ?? 0,
+    toneMappingExposure: renderer?.toneMappingExposure ?? 0,
     earthReentry: !!earthReentry,
     spaceMode: false,
   };
@@ -3854,7 +3883,7 @@ window.__forceTestMate = () => {
   mp.goAt = performance.now();
 };
 
-window.__testRocketLaunch = () => {
+window.__testRocketLaunch = (height = 99980) => {
   if (!navigator.webdriver) return false;
   const rocketIndex = PLANE_ORDER.indexOf("rocket");
   selectMode("free");
@@ -3872,7 +3901,7 @@ window.__testRocketLaunch = () => {
   el.menu.classList.add("hidden");
   el.landing.classList.add("hidden");
   el.lobby.classList.add("hidden");
-  plane.height = 99980;
+  plane.height = Number.isFinite(height) ? height : 99980;
   startRocketLaunch();
   if (rocketLaunch) rocketLaunch.velocity = 1200;
   return !!rocketLaunch;
