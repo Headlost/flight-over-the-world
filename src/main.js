@@ -2841,7 +2841,7 @@ function triggerInterstellarJump() {
     blackHoleCountdownTimer = setInterval(updateCountdown, 100);
     blackHoleCountdownDelayTimer = null;
   }, BLACK_HOLE_COUNTDOWN_DELAY_MS);
-  startBlackHoleFinale();
+  startBlackHoleFinale(BLACK_HOLE_SEQUENCE_MS / 1000);
   blackHolePhaseTimer = setTimeout(() => {
     blackHolePhase = "approach";
     el.interstellar?.classList.add("approach-phase");

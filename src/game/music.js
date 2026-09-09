@@ -58,12 +58,23 @@ export function setBlackHoleProximity(value) {
   }
 }
 
-export function startBlackHoleFinale() {
+export function startBlackHoleFinale(totalSeconds = 32) {
   if (!blackHoleScore) return;
   blackHoleTransit = true;
   blackHoleTransitProgress = 0;
   blackHoleProximity = 1;
   resetScoreWhenSilent = false;
+  const cueFinale = () => {
+    if (!Number.isFinite(blackHoleScore.duration) || blackHoleScore.duration <= 1) return;
+    const cue = Math.max(0, blackHoleScore.duration - Math.max(1, totalSeconds) - 0.25);
+    blackHoleScore.currentTime = cue;
+    // The timestamp changes under the four-second blackout. Pull the gain down
+    // briefly so the climactic section can swell back in with the countdown.
+    blackHoleScore.volume = Math.min(blackHoleScore.volume, 0.16);
+    playBlackHoleScore();
+  };
+  if (blackHoleScore.readyState >= 1) cueFinale();
+  else blackHoleScore.addEventListener("loadedmetadata", cueFinale, { once: true });
   playBlackHoleScore();
 }
 
