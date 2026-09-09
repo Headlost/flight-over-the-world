@@ -89,9 +89,11 @@ export class SpaceFlightController {
     this.position = new Vector3();
     this.forward = new Vector3(0, 0, -1);
     this.speed = 0;
-    this.cruiseSpeed = 92;
-    this.precisionSpeed = 28;
-    this.hyperSpeed = 1450;
+    // Orbital flight is intentionally calmer than the atmospheric launch.
+    // Keep every manual space-flight speed at 80% of the previous profile.
+    this.cruiseSpeed = 73.6;
+    this.precisionSpeed = 22.4;
+    this.hyperSpeed = 1160;
     this.targetName = "Moon";
     this.autopilot = false;
     this.orbitBody = null;

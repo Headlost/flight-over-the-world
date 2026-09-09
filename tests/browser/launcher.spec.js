@@ -152,9 +152,15 @@ test('space environments support reentry, planetary surface flight and the black
   await expect(page.locator('body')).toHaveClass(/black-hole-gravity/);
   await expect.poll(() => page.evaluate(() => window.__dbg?.music?.blackHole?.proximity || 0)).toBeGreaterThan(0.4);
   expect(await page.evaluate(() => window.__testSpaceApproach('Galactic Core', -1, 60))).toBe(true);
+  await expect.poll(() => page.evaluate(() => window.__dbg?.blackHoleCaptureProgress || 0)).toBeGreaterThan(0);
+  await expect.poll(() => page.evaluate(() => window.__dbg?.blackHoleCameraShake || 0)).toBeGreaterThan(0);
   await expect(page.locator('#interstellar')).toHaveClass(/show/);
+  await expect(page.locator('#interstellar')).toHaveClass(/silent-void/);
+  await expect(page.locator('#transit-status')).toBeHidden();
+  await expect(page.locator('#transit-countdown')).toBeHidden();
+  await expect(page.locator('#interstellar')).not.toHaveClass(/silent-void/, {timeout:2000});
   await expect(page.locator('#transit-status')).toContainText('EVENT HORIZON');
-  await expect(page.locator('#transit-countdown strong')).toHaveText(/\d{2}/);
+  await expect(page.locator('#transit-countdown')).toBeVisible();
   await expect(page.locator('#interstellar')).toHaveClass(/tesseract-phase/, {timeout:3000});
   await expect(page.locator('#tesseract-canvas')).toBeVisible();
   expect(await page.locator('#tesseract-canvas').evaluate(canvas => canvas.width > 0 && canvas.height > 0)).toBe(true);

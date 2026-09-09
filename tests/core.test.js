@@ -191,6 +191,9 @@ test('shared model resources are freed exactly once and detached', () => {
 
 test('rocket enters a stable visible Earth orbit', () => {
   const flight = new SpaceFlightController();
+  assert.equal(flight.cruiseSpeed, 73.6);
+  assert.equal(flight.precisionSpeed, 22.4);
+  assert.equal(flight.hyperSpeed, 1160);
   assert.equal(flight.enterOrbit('Earth', 36), true);
   const earth = flight.bodies.get('Earth');
   const radius = flight.position.distanceTo(earth.position);
