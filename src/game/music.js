@@ -1,6 +1,7 @@
 const BACKGROUND_GAIN = 0.22;
 const BLACK_HOLE_GAIN = 0.48;
 const BLACK_HOLE_ENTRY_MIX = 0.25;
+const BLACK_HOLE_CUE_SECONDS = 30;
 
 const background = document.getElementById("bgm");
 const blackHoleScore = document.getElementById("black-hole-score");
@@ -32,32 +33,37 @@ function playBlackHoleScore() {
   blackHoleScore.play().catch(() => {});
 }
 
+function cueBlackHoleScore() {
+  if (!blackHoleScore) return;
+  const seekAndPlay = () => {
+    if (!blackHoleTransit && blackHoleProximity <= 0.015) return;
+    if (Number.isFinite(blackHoleScore.duration) && blackHoleScore.duration > 1) {
+      blackHoleScore.currentTime = Math.min(BLACK_HOLE_CUE_SECONDS, blackHoleScore.duration - 1);
+    }
+    playBlackHoleScore();
+  };
+  if (blackHoleScore.readyState >= 1) seekAndPlay();
+  else blackHoleScore.addEventListener("loadedmetadata", seekAndPlay, { once: true });
+}
+
 export function setBlackHoleProximity(value) {
+  const wasActive = blackHoleTransit || blackHoleProximity > 0.015;
   blackHoleProximity = Math.max(0, Math.min(1, Number(value) || 0));
   if (blackHoleProximity > 0.015) {
     resetScoreWhenSilent = false;
-    playBlackHoleScore();
+    if (!wasActive) cueBlackHoleScore();
+    else playBlackHoleScore();
   } else if (!blackHoleTransit) {
     resetScoreWhenSilent = true;
   }
 }
 
-export function startBlackHoleFinale(totalSeconds = 35) {
+export function startBlackHoleFinale() {
   if (!blackHoleScore) return;
   blackHoleTransit = true;
   blackHoleTransitProgress = 0;
   blackHoleProximity = 1;
   resetScoreWhenSilent = false;
-  const cueFinale = () => {
-    if (!Number.isFinite(blackHoleScore.duration) || blackHoleScore.duration <= 0) return;
-    const cue = Math.max(0, blackHoleScore.duration - Math.max(1, totalSeconds) - 0.25);
-    if (Math.abs(blackHoleScore.currentTime - cue) > 1.5) {
-      blackHoleScore.currentTime = cue;
-    }
-    playBlackHoleScore();
-  };
-  if (blackHoleScore.readyState >= 1) cueFinale();
-  else blackHoleScore.addEventListener("loadedmetadata", cueFinale, { once: true });
   playBlackHoleScore();
 }
 

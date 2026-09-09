@@ -13,6 +13,7 @@ Wersja 1.0 była punktem startowym zaimportowanym jako fork wcześniejszego proj
 - spowolniono lot rakiety w przestrzeni o 20%, wydłużono przechwycenie przez czarną dziurę o siedmiosekundową spiralę, dodano narastające drżenie kamery, cztery sekundy czystej czerni oraz dalsze odliczanie samymi cyframi;
 - wydłużono przelot w teserakcie do 17 sekund, zabezpieczono jego zakończenie niezależnym zegarem i dodano natychmiastowe pojawienie się na farmie Coopera z dalszą kamerą;
 - zsynchronizowano ostrzeżenie Gravity Well z szybkim, płynnym wyciszeniem muzyki podstawowej i wejściem ścieżki czarnej dziury;
+- ustawiono początek ścieżki czarnej dziury na 30. sekundę nagrania i usunięto późniejszy skok odtwarzania przy wejściu do tunelu;
 - zakończenie czarnej dziury prowadzi rakietę na farmę Coopera, udostępnia bezkluczowy odnośnik do referencyjnego widoku i pozwala wystartować ponownie;
 - usunięto z interfejsu Guess the region, Fly home i wybór Poland/Europe/World;
 - zastąpiono profile jakości jednym adaptacyjnym profilem wysokiej szczegółowości;

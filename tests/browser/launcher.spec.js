@@ -157,10 +157,13 @@ test('space environments support reentry, planetary surface flight and the black
   await expect.poll(() => page.evaluate(() => window.__dbg?.music?.gain ?? 1)).toBeLessThan(0.04);
   await expect.poll(() => page.evaluate(() => window.__dbg?.music?.blackHole?.gain || 0)).toBeGreaterThan(0.18);
   await expect.poll(() => page.evaluate(() => window.__dbg?.music?.blackHole?.crossfadeActive)).toBe(true);
+  await expect.poll(() => page.evaluate(() => window.__dbg?.music?.blackHole?.time || 0)).toBeGreaterThanOrEqual(30);
+  const blackHoleCueTime = await page.evaluate(() => window.__dbg.music.blackHole.time);
   expect(await page.evaluate(() => window.__testSpaceApproach('Galactic Core', -1, 60))).toBe(true);
   await expect.poll(() => page.evaluate(() => window.__dbg?.blackHoleCaptureProgress || 0)).toBeGreaterThan(0);
   await expect.poll(() => page.evaluate(() => window.__dbg?.blackHoleCameraShake || 0)).toBeGreaterThan(0);
   await expect(page.locator('#interstellar')).toHaveClass(/show/);
+  expect(await page.evaluate(() => window.__dbg.music.blackHole.time)).toBeLessThan(blackHoleCueTime + 5);
   expect(await page.evaluate(() => window.__testDropBlackHoleFinishTimer())).toBe(true);
   await expect(page.locator('#interstellar')).toHaveClass(/silent-void/);
   await expect(page.locator('#transit-status')).toBeHidden();
