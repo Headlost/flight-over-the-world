@@ -1,5 +1,6 @@
 const BACKGROUND_GAIN = 0.22;
 const BLACK_HOLE_GAIN = 0.48;
+const BLACK_HOLE_ENTRY_MIX = 0.25;
 
 const background = document.getElementById("bgm");
 const blackHoleScore = document.getElementById("black-hole-score");
@@ -72,11 +73,15 @@ export function stopBlackHoleScore() {
 }
 
 export function updateMusic() {
+  const blackHoleActive = blackHoleTransit || blackHoleProximity > 0.015;
+  const proximityMix = blackHoleProximity > 0
+    ? BLACK_HOLE_ENTRY_MIX + (1 - BLACK_HOLE_ENTRY_MIX) * Math.pow(blackHoleProximity, 0.68)
+    : 0;
   const scoreTarget = BLACK_HOLE_GAIN * (blackHoleTransit
     ? 1 + blackHoleTransitProgress * 0.28
-    : Math.pow(blackHoleProximity, 0.68));
+    : proximityMix);
   if (blackHoleScore) {
-    blackHoleScore.volume = approach(blackHoleScore.volume, scoreTarget, scoreTarget > blackHoleScore.volume ? 5.4 : 2.2);
+    blackHoleScore.volume = approach(blackHoleScore.volume, scoreTarget, scoreTarget > blackHoleScore.volume ? 8.5 : 2.2);
     if (scoreTarget > 0.008 && blackHoleScore.paused) playBlackHoleScore();
     if (resetScoreWhenSilent && blackHoleScore.volume < 0.006) {
       blackHoleScore.pause();
@@ -87,8 +92,8 @@ export function updateMusic() {
   }
 
   if (!background) return;
-  const backgroundTarget = BACKGROUND_GAIN * (1 - Math.min(0.94, Math.max(blackHoleProximity, blackHoleTransit ? 1 : 0)));
-  background.volume = approach(background.volume, backgroundTarget, 3.4);
+  const backgroundTarget = blackHoleActive ? 0 : BACKGROUND_GAIN;
+  background.volume = approach(background.volume, backgroundTarget, blackHoleActive ? 7.8 : 3.4);
   if (!background.paused || document.hidden) return;
   const now = performance.now();
   if (now - lastRetry < 3000) return;
@@ -111,6 +116,7 @@ export function musicDebug() {
       time: Math.round(blackHoleScore.currentTime * 10) / 10,
       gain: Math.round(blackHoleScore.volume * 1000) / 1000,
       proximity: Math.round(blackHoleProximity * 1000) / 1000,
+      crossfadeActive: blackHoleTransit || blackHoleProximity > 0.015,
       transit: blackHoleTransit,
       transitProgress: Math.round(blackHoleTransitProgress * 1000) / 1000,
     } : null,
