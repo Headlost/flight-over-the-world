@@ -246,6 +246,19 @@ test('manual space steering cancels course assist and nearby R orbit assist is r
   assert.equal(flight.orbitBody, null);
 });
 
+test('space steering is calmer at cruise and damped further during hyperdrive', () => {
+  const cruise = new SpaceFlightController();
+  const hyper = new SpaceFlightController();
+  for (let i = 0; i < 60; i++) {
+    cruise.update(1 / 60, {roll:1,pitch:0,throttle:0});
+    hyper.update(1 / 60, {roll:1,pitch:0,throttle:1});
+  }
+  const cruiseTurn = Math.acos(Math.max(-1, Math.min(1, -cruise.forward.z)));
+  const hyperTurn = Math.acos(Math.max(-1, Math.min(1, -hyper.forward.z)));
+  assert.ok(cruiseTurn > 0.8 && cruiseTurn < 1);
+  assert.ok(hyperTurn < cruiseTurn * 0.55);
+});
+
 test('guided planetary entry becomes stable low-altitude surface flight', () => {
   const flight = new SpaceFlightController();
   const mars = flight.bodies.get('Mars');

@@ -334,12 +334,16 @@ export class SpaceFlightController {
     }
 
     if (manual) {
-      scratchQ.setFromAxisAngle(UP, -(controls.roll || 0) * 1.28 * dt);
+      // At interplanetary speeds even a small angular change produces a very
+      // large sideways jump. Keep cruise steering deliberate and make
+      // hyperdrive substantially calmer without taking control away.
+      const turnScale = this.hyperdrive ? 0.34 : controls.throttle < 0 ? 0.55 : 0.72;
+      scratchQ.setFromAxisAngle(UP, -(controls.roll || 0) * 1.28 * turnScale * dt);
       this.forward.applyQuaternion(scratchQ);
       const right = scratchV.crossVectors(this.forward, UP);
       if (right.lengthSq() < 1e-5) right.copy(RIGHT);
       else right.normalize();
-      scratchQ.setFromAxisAngle(right, -(controls.pitch || 0) * 1.05 * dt);
+      scratchQ.setFromAxisAngle(right, -(controls.pitch || 0) * 1.05 * turnScale * dt);
       this.forward.applyQuaternion(scratchQ).normalize();
       this.forward.y = clamp(this.forward.y, -0.985, 0.985);
       this.forward.normalize();

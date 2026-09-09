@@ -2625,6 +2625,8 @@ const spaceRight = new Vector3();
 const spaceLook = new Vector3();
 const spaceCameraGoal = new Vector3();
 const spaceViewOffset = new Vector3();
+const spacePositionBefore = new Vector3();
+const spaceCameraTravel = new Vector3();
 const spaceCtrl = { roll: 0, pitch: 0, throttle: 0 };
 
 function setSpaceNotice(message, duration = 2600) {
@@ -3174,6 +3176,7 @@ function renderSpaceCredits() {
 }
 
 function tickSpaceFrame(dt, rawDt, flying) {
+  spacePositionBefore.copy(spaceFlight.position);
   if (blackHoleSequence) {
     const transitNow = performance.now();
     if (blackHoleSequenceStartedAt && transitNow - blackHoleSequenceStartedAt >= BLACK_HOLE_SEQUENCE_MS) {
@@ -3201,6 +3204,7 @@ function tickSpaceFrame(dt, rawDt, flying) {
     spaceFlight.update(dt, spaceCtrl);
     checkSpaceEnvironment(dt);
   }
+  spaceCameraTravel.subVectors(spaceFlight.position, spacePositionBefore);
   document.body.classList.toggle("hyperdrive", !!(spaceCanMove && spaceFlight.hyperdrive));
 
   planeMesh.position.copy(spaceFlight.position);
@@ -3226,7 +3230,7 @@ function tickSpaceFrame(dt, rawDt, flying) {
   else spaceRight.normalize();
   spaceUp.crossVectors(spaceRight, spaceFlight.forward).normalize();
   const cameraLift = spaceUp;
-  const cameraRadius = (surfaceBody ? 7.8 : 21.2) * orbit.zoom;
+  const cameraRadius = (surfaceBody ? 7.2 : 18.5) * orbit.zoom;
   const cameraPitchCos = Math.cos(orbit.pitch);
   spaceViewOffset.copy(spaceFlight.forward).multiplyScalar(-Math.cos(orbit.yaw) * cameraPitchCos)
     .addScaledVector(spaceRight, Math.sin(orbit.yaw) * cameraPitchCos)
@@ -3234,7 +3238,13 @@ function tickSpaceFrame(dt, rawDt, flying) {
     .normalize();
   spaceCameraGoal.copy(spaceFlight.position).addScaledVector(spaceViewOffset, cameraRadius);
   if (!camInit) camPos.copy(spaceCameraGoal);
-  else camPos.lerp(spaceCameraGoal, 1 - Math.exp(-8 * dt));
+  else {
+    // Move the camera by the rocket's full frame translation before smoothing
+    // its orbit offset. This prevents the chase camera lag from exploding at
+    // hyperdrive speed and keeps the rocket at a stable on-screen distance.
+    camPos.add(spaceCameraTravel);
+    camPos.lerp(spaceCameraGoal, 1 - Math.exp(-10 * dt));
+  }
   camInit = true;
   camera.position.copy(camPos);
   const captureShake = blackHoleCaptureStartedAt
@@ -3246,7 +3256,7 @@ function tickSpaceFrame(dt, rawDt, flying) {
     camera.position.addScaledVector(spaceRight, (Math.sin(shakeTime * 31) + Math.sin(shakeTime * 47) * 0.35) * shakeAmount);
     camera.position.addScaledVector(spaceUp, (Math.cos(shakeTime * 37) + Math.sin(shakeTime * 53) * 0.3) * shakeAmount * 0.72);
   }
-  camTarget.copy(spaceFlight.position).addScaledVector(spaceFlight.forward, 8);
+  camTarget.copy(spaceFlight.position).addScaledVector(spaceFlight.forward, 5);
   camera.up.copy(cameraLift);
   camera.lookAt(camTarget);
   solarSystem.update(
@@ -3260,7 +3270,7 @@ function tickSpaceFrame(dt, rawDt, flying) {
 
   const entryAge = spaceEntryTransition ? performance.now() - spaceEntryTransition.startedAt : Infinity;
   const entryZoom = entryAge < 4600 ? Math.sin(Math.min(1, entryAge / 4600) * Math.PI) : 0;
-  const targetFov = spaceFlight.hyperdrive ? 86 : surfaceBody ? 62 : spaceEntryBody ? 70 - entryZoom * 15 : 70;
+  const targetFov = spaceFlight.hyperdrive ? 78 : surfaceBody ? 62 : spaceEntryBody ? 70 - entryZoom * 15 : 70;
   if (Math.abs(camera.fov - targetFov) > 0.05) {
     camera.fov += (targetFov - camera.fov) * Math.min(1, 4 * dt);
     camera.updateProjectionMatrix();
@@ -3452,7 +3462,7 @@ function bindOrbit(canvas) {
   });
   canvas.addEventListener('pointermove', e => { if (orbit.dragging) { orbit.yaw -= e.movementX * 0.005; orbit.pitch = Math.max(-1.2, Math.min(1.4, orbit.pitch + e.movementY * 0.005)); } });
   for (const event of ['pointerup','pointercancel','lostpointercapture']) canvas.addEventListener(event, () => { orbit.dragging = false; });
-  canvas.addEventListener('wheel', e => { if (!menuOpen) { e.preventDefault(); orbit.zoom = Math.max(spaceModeActive ? 0.35 : 0.5, Math.min(spaceModeActive ? 12 : 8, orbit.zoom * Math.exp(e.deltaY * 0.001))); } }, {passive:false});
+  canvas.addEventListener('wheel', e => { if (!menuOpen) { e.preventDefault(); orbit.zoom = Math.max(spaceModeActive ? 0.2 : 0.5, Math.min(spaceModeActive ? 12 : 8, orbit.zoom * Math.exp(e.deltaY * 0.001))); } }, {passive:false});
 }
 function applyQuality() {
   if (!renderer) return;
