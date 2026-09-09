@@ -147,6 +147,9 @@ test('space environments support reentry, planetary surface flight and the black
   await page.keyboard.press('r');
   await expect.poll(() => page.evaluate(() => window.__dbg?.orbitBody)).toBe('Mars');
 
+  expect(await page.evaluate(() => window.__testSpaceApproach('Galactic Core', 10000, 92))).toBe(true);
+  await expect(page.locator('body')).not.toHaveClass(/black-hole-gravity/);
+  await expect.poll(() => page.evaluate(() => window.__dbg?.music?.blackHole?.proximity || 0)).toBe(0);
   expect(await page.evaluate(() => window.__testSpaceApproach('Galactic Core', 4000, 92))).toBe(true);
   await expect.poll(() => page.evaluate(() => window.__dbg?.blackHoleGravity?.intensity || 0)).toBeGreaterThan(0.35);
   await expect(page.locator('body')).toHaveClass(/black-hole-gravity/);
@@ -155,18 +158,23 @@ test('space environments support reentry, planetary surface flight and the black
   await expect.poll(() => page.evaluate(() => window.__dbg?.blackHoleCaptureProgress || 0)).toBeGreaterThan(0);
   await expect.poll(() => page.evaluate(() => window.__dbg?.blackHoleCameraShake || 0)).toBeGreaterThan(0);
   await expect(page.locator('#interstellar')).toHaveClass(/show/);
+  expect(await page.evaluate(() => window.__testDropBlackHoleFinishTimer())).toBe(true);
   await expect(page.locator('#interstellar')).toHaveClass(/silent-void/);
   await expect(page.locator('#transit-status')).toBeHidden();
   await expect(page.locator('#transit-countdown')).toBeHidden();
   await expect(page.locator('#interstellar')).not.toHaveClass(/silent-void/, {timeout:2000});
-  await expect(page.locator('#transit-status')).toContainText('EVENT HORIZON');
+  await expect(page.locator('#interstellar')).toHaveClass(/countdown-only/);
   await expect(page.locator('#transit-countdown')).toBeVisible();
+  await expect(page.locator('#transit-countdown span')).toBeHidden();
+  await expect(page.locator('#transit-status')).toBeHidden();
   await expect(page.locator('#interstellar')).toHaveClass(/tesseract-phase/, {timeout:3000});
+  await expect(page.locator('#transit-status')).toBeVisible();
   await expect(page.locator('#tesseract-canvas')).toBeVisible();
   expect(await page.locator('#tesseract-canvas').evaluate(canvas => canvas.width > 0 && canvas.height > 0)).toBe(true);
   await expect.poll(() => page.evaluate(() => window.__dbg?.spaceMode), {timeout:7000}).toBe(false);
   await expect.poll(() => page.evaluate(() => window.__dbg?.selectedPlane)).toBe('rocket');
   await expect.poll(() => page.evaluate(() => window.__dbg?.cooperFarmRocketReady), {timeout:7000}).toBe(true);
+  await expect.poll(() => page.evaluate(() => window.__dbg?.camDist)).toBeGreaterThan(24);
   await expect.poll(() => page.evaluate(() => window.__dbg?.lat)).toBeCloseTo(50.4064167, 5);
   await expect.poll(() => page.evaluate(() => window.__dbg?.lon)).toBeCloseTo(-114.2042778, 5);
   await expect(page.locator('#location-arrival')).toHaveClass(/show/);
