@@ -38,6 +38,7 @@ import {
   Mesh,
   MeshBasicMaterial,
   MeshStandardMaterial,
+  AdditiveBlending,
   ConeGeometry,
   CylinderGeometry,
   SphereGeometry,
@@ -81,6 +82,60 @@ import { TesseractTransit } from "./game/tesseract.js";
 function prepareRocket(model) {
   model.rotation.x = -Math.PI / 2;
   return model;
+}
+
+function createRocketPlume() {
+  const plume = new Group();
+  plume.name = "rocket-engine-plume";
+  plume.rotation.x = Math.PI / 2;
+  const outerMaterial = new MeshBasicMaterial({
+    color: 0xffa11f,
+    transparent: true,
+    opacity: 0.7,
+    depthWrite: false,
+  });
+  const coreMaterial = new MeshBasicMaterial({
+    color: 0xfff1a3,
+    transparent: true,
+    opacity: 0.92,
+    blending: AdditiveBlending,
+    depthWrite: false,
+  });
+  const outer = new Mesh(new ConeGeometry(0.62, 5.8, 18, 1, true), outerMaterial);
+  outer.position.y = 2.9;
+  const core = new Mesh(new ConeGeometry(0.25, 3.8, 14, 1, true), coreMaterial);
+  core.position.y = 1.9;
+  plume.add(outer, core);
+  plume.visible = false;
+  plume.userData.outer = outer;
+  plume.userData.core = core;
+  plume.userData.outerMaterial = outerMaterial;
+  plume.userData.coreMaterial = coreMaterial;
+  plume.userData.space = false;
+  return plume;
+}
+
+function attachRocketPlume(wrapper, model) {
+  const box = new Box3().setFromObject(model);
+  const plume = createRocketPlume();
+  plume.position.set(0, 0, box.max.z + 0.04);
+  wrapper.add(plume);
+  wrapper.userData.rocketPlume = plume;
+}
+
+function updateRocketPlume(root, active, intensity = 1, space = false, elapsed = 0) {
+  const plume = root?.userData?.rocketPlume;
+  if (!plume) return;
+  const power = Math.max(0.15, Math.min(1.35, Number(intensity) || 0));
+  plume.visible = !!active;
+  plume.userData.space = !!space;
+  if (!active) return;
+  const flicker = 0.92 + Math.sin(elapsed * 47) * 0.055 + Math.sin(elapsed * 83) * 0.025;
+  plume.scale.set(0.82 + power * 0.18, (0.68 + power * 0.5) * flicker, 0.82 + power * 0.18);
+  plume.userData.outerMaterial.color.setHex(space ? 0x147cff : 0xffa21a);
+  plume.userData.coreMaterial.color.setHex(space ? 0xb8f4ff : 0xfff0a0);
+  plume.userData.outerMaterial.opacity = space ? 0.72 : 0.7;
+  plume.userData.coreMaterial.opacity = space ? 0.88 : 0.94;
 }
 
 // myśliwiec w GLB ma nos w +Z, a lot idzie w -Z
@@ -250,6 +305,7 @@ const PLANES = {
     file: asset("models/rocket.glb"),
     wingspan: 12,
     cruise: 220, boost: 600, brake: 120,
+    steering: 1.2,
     cam: [0, 6, 20],
     name: "Rocket",
     desc: "Space rocket · R vertical launch to orbit · Shift hyperdrive between planets",
@@ -1852,6 +1908,7 @@ function loadPlane(key) {
     if (!spec.build) wrapper.add(model);
     wrapper.userData.prop = null;
     wrapper.userData.key = key;
+    if (key === "rocket") attachRocketPlume(wrapper, model);
     applyRotorState(wrapper, true);
     wrapper.visible = planeMesh.visible;
     disposeModel(planeMesh);
@@ -3156,6 +3213,13 @@ function tickSpaceFrame(dt, rawDt, flying) {
   planeMesh.quaternion.setFromRotationMatrix(spaceMatrix);
   planeMesh.scale.setScalar(0.16);
   planeMesh.visible = !menuOpen && !crashed && !blackHoleSequence;
+  updateRocketPlume(
+    planeMesh,
+    spaceCanMove && !spaceFlight.orbitBody,
+    spaceFlight.hyperdrive ? 1.3 : Math.max(0.42, spaceFlight.speed / spaceFlight.cruiseSpeed),
+    true,
+    clock.elapsedTime,
+  );
 
   spaceRight.crossVectors(spaceFlight.forward, spaceUp);
   if (spaceRight.lengthSq() < 1e-5) spaceRight.set(1, 0, 0);
@@ -3264,6 +3328,11 @@ function tickSpaceFrame(dt, rawDt, flying) {
     blackHoleCameraShake: captureShake,
     selectedPlane,
     planeMeshKey: planeMesh?.userData?.key || "",
+    rocketPlume: planeMesh?.userData?.rocketPlume ? {
+      visible: planeMesh.userData.rocketPlume.visible,
+      space: !!planeMesh.userData.rocketPlume.userData.space,
+      color: `#${planeMesh.userData.rocketPlume.userData.outerMaterial.color.getHexString()}`,
+    } : null,
     music: musicDebug(),
     spaceCameraDistance: camera.position.distanceTo(spaceFlight.position),
     spaceCameraOrbit: { yaw: orbit.yaw, pitch: orbit.pitch, zoom: orbit.zoom },
@@ -3593,6 +3662,16 @@ function tickFrame() {
   }
   spinRotors(planeMesh, dt, plane.speed);
   if (selectedPlane === "parachutist") updateParachutistModel(planeMesh, plane.state, plane.speed, dt);
+  if (selectedPlane === "rocket") {
+    const rocketEngineActive = flying && !earthReentry && !interstellarArrivalPending && !cooperFarmRocketReady;
+    updateRocketPlume(
+      planeMesh,
+      rocketEngineActive,
+      rocketLaunch ? 1.3 : Math.max(0.35, plane.throttle),
+      false,
+      clock.elapsedTime,
+    );
+  }
   for (const mate of mp.mates.values()) {
     if (mate.mesh) spinRotors(mate.mesh, dt, plane.speed);
   }
@@ -3959,6 +4038,11 @@ function tickFrame() {
     mode,
     selectedPlane,
     planeMeshKey: planeMesh?.userData?.key || "",
+    rocketPlume: planeMesh?.userData?.rocketPlume ? {
+      visible: planeMesh.userData.rocketPlume.visible,
+      space: !!planeMesh.userData.rocketPlume.userData.space,
+      color: `#${planeMesh.userData.rocketPlume.userData.outerMaterial.color.getHexString()}`,
+    } : null,
     interstellarArrivalPending,
     cooperFarmRocketReady,
     timeLeft,

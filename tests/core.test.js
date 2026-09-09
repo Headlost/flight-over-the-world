@@ -95,6 +95,18 @@ test('faster aircraft have wider turns at the same bank', () => {
   assert.ok(slow.heading - Math.PI/2 > fast.heading - Math.PI/2);
 });
 
+test('rocket steering profile turns more tightly over Earth', () => {
+  const regular = new PlaneController(52, 16, 1000, 0, {cruise:220,boost:600,brake:120});
+  const rocket = new PlaneController(52, 16, 1000, 0, {cruise:220,boost:600,brake:120,steering:1.2});
+  for (let i = 0; i < 180; i++) {
+    regular.update(1 / 60, {roll:0.7,pitch:0,throttle:0});
+    rocket.update(1 / 60, {roll:0.7,pitch:0,throttle:0});
+  }
+  const regularTurn = Math.min(regular.heading, Math.PI * 2 - regular.heading);
+  const rocketTurn = Math.min(rocket.heading, Math.PI * 2 - rocket.heading);
+  assert.ok(rocketTurn > regularTurn * 1.18);
+});
+
 test('parachutist lands safely, walks at a constant brisk pace and relaunches gently', () => {
   const pilot = new ParachutistController(52, 16, 120, 0);
   for (let i = 0; i < 60; i++) pilot.update(1 / 60, {roll:0.5,pitch:-1,throttle:0});

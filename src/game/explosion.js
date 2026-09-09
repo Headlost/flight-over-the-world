@@ -9,7 +9,8 @@ import {
 } from "three";
 
 // Proceduralny wybuch: kula ognia (addytiwne cząsteczki) + dym + błysk światła.
-// Dźwięk generowany przez WebAudio — szum przez lowpass + opadający sub-bass.
+// Dźwięk generowany przez WebAudio — szerokopasmowy huk, ciśnieniowy pomruk
+// i odłamki. Bez tonalnego oscylatora, który brzmiał jak uderzenie w bęben.
 
 export function createExplosion(scene, pos) {
   const group = [];
@@ -144,35 +145,78 @@ export function getAudioCtx() {
 export function playExplosionSound() {
   primeAudio();
   const t = audioCtx.currentTime;
+  const master = audioCtx.createDynamicsCompressor();
+  master.threshold.setValueAtTime(-15, t);
+  master.knee.setValueAtTime(10, t);
+  master.ratio.setValueAtTime(5, t);
+  master.attack.setValueAtTime(0.002, t);
+  master.release.setValueAtTime(0.36, t);
+  master.connect(audioCtx.destination);
 
-  // huk: szum przez opadający lowpass
-  const dur = 1.3;
-  const buf = audioCtx.createBuffer(1, audioCtx.sampleRate * dur, audioCtx.sampleRate);
-  const data = buf.getChannelData(0);
-  for (let i = 0; i < data.length; i++) {
-    data[i] = (Math.random() * 2 - 1) * Math.pow(1 - i / data.length, 2.0);
+  // Pierwsza fala uderzeniowa: jasny trzask przechodzący w szeroki huk.
+  const blastDuration = 1.55;
+  const blastBuffer = audioCtx.createBuffer(1, Math.ceil(audioCtx.sampleRate * blastDuration), audioCtx.sampleRate);
+  const blastData = blastBuffer.getChannelData(0);
+  for (let i = 0; i < blastData.length; i++) {
+    const age = i / blastData.length;
+    const envelope = Math.pow(1 - age, 1.65);
+    blastData[i] = (Math.random() * 2 - 1) * envelope;
   }
-  const noise = audioCtx.createBufferSource();
-  noise.buffer = buf;
-  const lp = audioCtx.createBiquadFilter();
-  lp.type = "lowpass";
-  lp.frequency.setValueAtTime(3200, t);
-  lp.frequency.exponentialRampToValueAtTime(110, t + dur);
-  const ng = audioCtx.createGain();
-  ng.gain.setValueAtTime(0.85, t);
-  ng.gain.exponentialRampToValueAtTime(0.001, t + dur);
-  noise.connect(lp).connect(ng).connect(audioCtx.destination);
-  noise.start(t);
+  const blast = audioCtx.createBufferSource();
+  blast.buffer = blastBuffer;
+  const blastHighpass = audioCtx.createBiquadFilter();
+  blastHighpass.type = "highpass";
+  blastHighpass.frequency.setValueAtTime(38, t);
+  const blastLowpass = audioCtx.createBiquadFilter();
+  blastLowpass.type = "lowpass";
+  blastLowpass.frequency.setValueAtTime(6800, t);
+  blastLowpass.frequency.exponentialRampToValueAtTime(170, t + blastDuration);
+  const blastGain = audioCtx.createGain();
+  blastGain.gain.setValueAtTime(0.95, t);
+  blastGain.gain.exponentialRampToValueAtTime(0.001, t + blastDuration);
+  blast.connect(blastHighpass).connect(blastLowpass).connect(blastGain).connect(master);
+  blast.start(t);
 
-  // sub-basowe "bum"
-  const osc = audioCtx.createOscillator();
-  osc.type = "sine";
-  osc.frequency.setValueAtTime(130, t);
-  osc.frequency.exponentialRampToValueAtTime(28, t + 0.9);
-  const og = audioCtx.createGain();
-  og.gain.setValueAtTime(0.9, t);
-  og.gain.exponentialRampToValueAtTime(0.001, t + 1.0);
-  osc.connect(og).connect(audioCtx.destination);
-  osc.start(t);
-  osc.stop(t + 1.0);
+  // Niskie ciśnienie i pogłos są również szumem, więc nie tworzą nuty bębna.
+  const rumbleDuration = 2.25;
+  const rumbleBuffer = audioCtx.createBuffer(1, Math.ceil(audioCtx.sampleRate * rumbleDuration), audioCtx.sampleRate);
+  const rumbleData = rumbleBuffer.getChannelData(0);
+  let pressure = 0;
+  for (let i = 0; i < rumbleData.length; i++) {
+    pressure = pressure * 0.965 + (Math.random() * 2 - 1) * 0.035;
+    rumbleData[i] = pressure * Math.pow(1 - i / rumbleData.length, 1.15) * 3.2;
+  }
+  const rumble = audioCtx.createBufferSource();
+  rumble.buffer = rumbleBuffer;
+  const rumbleFilter = audioCtx.createBiquadFilter();
+  rumbleFilter.type = "lowpass";
+  rumbleFilter.frequency.setValueAtTime(240, t);
+  rumbleFilter.frequency.exponentialRampToValueAtTime(58, t + rumbleDuration);
+  const rumbleGain = audioCtx.createGain();
+  rumbleGain.gain.setValueAtTime(0.62, t + 0.015);
+  rumbleGain.gain.exponentialRampToValueAtTime(0.001, t + rumbleDuration);
+  rumble.connect(rumbleFilter).connect(rumbleGain).connect(master);
+  rumble.start(t + 0.015);
+
+  // Krótkie, nieregularne trzaski odłamków poszerzają wybuch bez tonalnego basu.
+  for (let burst = 0; burst < 6; burst++) {
+    const delay = 0.08 + burst * 0.055 + Math.random() * 0.045;
+    const duration = 0.055 + Math.random() * 0.07;
+    const debrisBuffer = audioCtx.createBuffer(1, Math.ceil(audioCtx.sampleRate * duration), audioCtx.sampleRate);
+    const debrisData = debrisBuffer.getChannelData(0);
+    for (let i = 0; i < debrisData.length; i++) {
+      debrisData[i] = (Math.random() * 2 - 1) * Math.pow(1 - i / debrisData.length, 3);
+    }
+    const debris = audioCtx.createBufferSource();
+    debris.buffer = debrisBuffer;
+    const debrisFilter = audioCtx.createBiquadFilter();
+    debrisFilter.type = "bandpass";
+    debrisFilter.frequency.value = 900 + Math.random() * 2800;
+    debrisFilter.Q.value = 0.65;
+    const debrisGain = audioCtx.createGain();
+    debrisGain.gain.setValueAtTime(0.26, t + delay);
+    debrisGain.gain.exponentialRampToValueAtTime(0.001, t + delay + duration);
+    debris.connect(debrisFilter).connect(debrisGain).connect(master);
+    debris.start(t + delay);
+  }
 }

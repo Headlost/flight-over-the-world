@@ -158,6 +158,7 @@ export class PlaneController {
     this.cruise = spec.cruise ?? 48;
     this.boost = spec.boost ?? 85;
     this.brake = spec.brake ?? 30;
+    this.steering = Math.max(0.5, Math.min(1.5, spec.steering ?? 1));
     this.speed = this.cruise; // m/s
     const span = Math.max(1, this.boost - this.brake);
     this.cruiseT = Math.max(0, Math.min(1, (this.cruise - this.brake) / span));
@@ -169,9 +170,9 @@ export class PlaneController {
     if (!Number.isFinite(dt) || dt <= 0 || this.crashed) return;
     dt = Math.min(dt, 0.05);
     // ctrl: roll -1..1, pitch -1..1, throttle -1..1 tylko dopóki klawisz wciśnięty
-    const targetRoll = -ctrl.roll * 0.9;
+    const targetRoll = -ctrl.roll * 0.9 * this.steering;
     const targetPitch = ctrl.pitch * 0.4;
-    this.roll += (targetRoll - this.roll) * (1 - Math.exp(-6 * dt));
+    this.roll += (targetRoll - this.roll) * (1 - Math.exp(-(6 + (this.steering - 1) * 2) * dt));
     this.pitch += (targetPitch - this.pitch) * (1 - Math.exp(-4 * dt));
 
     const hold = ctrl.throttle > 0 ? 1 : ctrl.throttle < 0 ? 0 : this.cruiseT;

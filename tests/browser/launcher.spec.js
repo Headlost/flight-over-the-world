@@ -86,6 +86,9 @@ test('rocket crosses into orbit, selects Mars and engages hyperdrive', async ({p
   await page.keyboard.down('Shift');
   await expect.poll(() => page.evaluate(() => window.__dbg?.hyperdrive)).toBe(true);
   await expect.poll(() => page.evaluate(() => window.__dbg?.spaceSpeed)).toBeGreaterThan(cruise + 100);
+  await expect.poll(() => page.evaluate(() => window.__dbg?.rocketPlume?.visible)).toBe(true);
+  await expect.poll(() => page.evaluate(() => window.__dbg?.rocketPlume?.space)).toBe(true);
+  await expect.poll(() => page.evaluate(() => window.__dbg?.rocketPlume?.color)).toBe('#147cff');
   await page.keyboard.up('Shift');
   const cameraBefore = await page.evaluate(() => ({...window.__dbg.spaceCameraOrbit}));
   const canvas = page.locator('#game-canvas');
@@ -106,6 +109,9 @@ test('rocket launch keeps a close chase camera and darkens the upper atmosphere'
   await expect.poll(() => page.evaluate(() => window.__dbg?.rocketLaunch)).toBe(true);
   await expect.poll(() => page.evaluate(() => window.__dbg?.camDist)).toBeLessThan(13);
   await expect.poll(() => page.evaluate(() => window.__dbg?.skySpaceBlend)).toBeGreaterThan(0);
+  await expect.poll(() => page.evaluate(() => window.__dbg?.rocketPlume?.visible)).toBe(true);
+  await expect.poll(() => page.evaluate(() => window.__dbg?.rocketPlume?.space)).toBe(false);
+  await expect.poll(() => page.evaluate(() => window.__dbg?.rocketPlume?.color)).toBe('#ffa21a');
 });
 
 test('rocket launch has the faster ascent profile', async ({page}) => {
