@@ -33,43 +33,73 @@ export class AdaptiveQuality {
  * always served first; an off-screen sweep is allowed only while FPS and memory
  * have enough headroom.
  */
-export function terrainStreamProfile(mode, fps = 60, mobile = false, cacheFull = false) {
+export function terrainStreamProfile(mode, fps = 60, mobile = false, cacheFull = false, memorySafe = false, fastFlight = false) {
   const rate = Number.isFinite(fps) ? Math.max(1, fps) : 60;
+  let profile;
   if (mode === 'street') {
     const error = mobile
       ? rate >= 50 ? 4 : rate >= 32 ? 5.25 : 7
       : rate >= 52 ? 2.75 : rate >= 32 ? 4.25 : 6;
-    return {
+    profile = {
       error,
       errorFalloff: 2,
       maxTilesProcessed: rate < 28 ? 90 : rate < 45 ? 130 : 180,
-      cacheTiles: mobile ? 1800 : 3800,
-      cacheBytes: mobile ? 300e6 : 700e6,
-      gpuBytes: mobile ? 200e6 : 500e6,
+      cacheTiles: mobile ? 1200 : 3800,
+      cacheBytes: mobile ? 220e6 : 700e6,
+      gpuBytes: mobile ? 150e6 : 500e6,
       prefetch: !cacheFull && rate >= (mobile ? 55 : 52),
       prefetchWidth: mobile ? 320 : 480,
     };
-  }
-  if (mode === 'landing') {
-    return {
+  } else if (mode === 'landing') {
+    profile = {
       error: mobile ? 6 : rate < 32 ? 6 : 4,
       errorFalloff: 1.5,
       maxTilesProcessed: rate < 32 ? 100 : 170,
-      cacheTiles: mobile ? 1500 : 3200,
-      cacheBytes: mobile ? 260e6 : 620e6,
-      gpuBytes: mobile ? 180e6 : 440e6,
+      cacheTiles: mobile ? 1000 : 3200,
+      cacheBytes: mobile ? 190e6 : 620e6,
+      gpuBytes: mobile ? 130e6 : 440e6,
       prefetch: !cacheFull && rate >= (mobile ? 55 : 52),
       prefetchWidth: mobile ? 300 : 420,
     };
+  } else {
+    profile = {
+      error: 7,
+      errorFalloff: 1,
+      maxTilesProcessed: rate < 32 ? 120 : 250,
+      cacheTiles: mobile ? 800 : 2400,
+      cacheBytes: mobile ? 160e6 : 520e6,
+      gpuBytes: mobile ? 110e6 : 380e6,
+      prefetch: false,
+      prefetchWidth: 0,
+    };
   }
+
+  if (fastFlight) {
+    // Keep the same screen-space error and cache budgets. Only spread tile-tree
+    // expansion and GLTF parsing over more frames so a fast turn cannot place a
+    // large synchronous burst in the middle of one rendered frame.
+    profile.maxTilesProcessed = Math.min(profile.maxTilesProcessed, mobile ? 55 : 84);
+    profile.maxConcurrentParses = mobile ? 1 : 2;
+  }
+
+  if (!mobile) return profile;
+
+  const mobileProcessed = mode === 'street' ? 120 : mode === 'landing' ? 100 : 90;
+  profile.maxTilesProcessed = Math.min(profile.maxTilesProcessed, mobileProcessed);
+  profile.prefetch = false;
+  if (!memorySafe) return profile;
+
+  // Keep the same visible detail target, but prevent a recovering phone from
+  // retaining or decoding enough neighbouring tiles to be killed by the OS.
+  const safe = mode === 'street'
+    ? { cacheTiles: 700, cacheBytes: 144e6, gpuBytes: 104e6, maxTilesProcessed: 80 }
+    : mode === 'landing'
+      ? { cacheTiles: 600, cacheBytes: 128e6, gpuBytes: 92e6, maxTilesProcessed: 70 }
+      : { cacheTiles: 480, cacheBytes: 96e6, gpuBytes: 72e6, maxTilesProcessed: 60 };
   return {
-    error: 7,
-    errorFalloff: 1,
-    maxTilesProcessed: rate < 32 ? 120 : 250,
-    cacheTiles: mobile ? 1200 : 2400,
-    cacheBytes: mobile ? 220e6 : 520e6,
-    gpuBytes: mobile ? 150e6 : 380e6,
+    ...profile,
+    ...safe,
+    maxTilesProcessed: Math.min(profile.maxTilesProcessed, safe.maxTilesProcessed),
     prefetch: false,
-    prefetchWidth: 0,
   };
 }

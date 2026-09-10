@@ -3,7 +3,7 @@ import { disposeModel } from './game/dispose.js';
 import { QUALITY, renderRatio, AdaptiveQuality, terrainStreamProfile } from './game/quality.js';
 import { geocodeCity, setupLocationPicker } from './game/location.js';
 import { validMessage, escapeHtml } from './game/protocol.js';
-import { renderAttributions } from './game/attribution.js';
+import { attributionSignature, renderAttributions } from './game/attribution.js';
 import {
   WGS84_ELLIPSOID,
   CAMERA_FRAME,
@@ -76,7 +76,14 @@ import {
 } from "./game/music.js";
 import { streetViewUrl } from "./game/streetview.js";
 import { createSolarSystem, SPACE_BODIES, SpaceFlightController } from "./game/space.js";
-import { TesseractTransit } from "./game/tesseract.js";
+import {
+  ContactConfirmation,
+  parachutistCameraClimbAssist,
+  raycastTerrain,
+  raycastVisibleTerrain,
+  rocketLaunchCameraPhase,
+  updateChaseOffset,
+} from "./game/flightSafety.js";
 
 // rakieta stoi pionowo (+Y) — połóż ją nosem do przodu (-Z, konwencja lotu)
 function prepareRocket(model) {
@@ -295,6 +302,7 @@ const PLANES = {
     file: asset("models/jet.glb"),
     wingspan: 10,
     cruise: 150, boost: 420, brake: 80,
+    turnRate: 4,
     cam: [0, 6, 19],
     name: "Fighter",
     desc: "Combat jet – cruise 540, max 1510 km/h",
@@ -339,6 +347,8 @@ let earthReentry = null;
 let spaceModeActive = false;
 let spaceNotice = "";
 let spaceNoticeUntil = 0;
+let spaceActionHintContext = "";
+let spaceActionHintUntil = 0;
 let spaceEnvironmentMessage = "";
 let spaceEntryBody = null;
 let spaceLandedBody = null;
@@ -356,7 +366,7 @@ let blackHoleCaptureStartedAt = 0;
 let blackHoleCaptureProgress = 0;
 let blackHoleSequenceStartedAt = 0;
 let blackHoleTesseractStartedAt = 0;
-let tesseractTransit = null;
+let tesseractVideoError = "";
 let interstellarArrivalPending = false;
 let interstellarArrivalStartedAt = 0;
 let cooperFarmRocketReady = false;
@@ -372,7 +382,7 @@ const isMobile =
     (navigator.maxTouchPoints > 1 && matchMedia("(pointer: coarse)").matches));
 const BLACK_HOLE_VOID_MS = navigator.webdriver ? 1000 : 10000;
 const BLACK_HOLE_APPROACH_MS = navigator.webdriver ? 500 : 5000;
-const BLACK_HOLE_TESSERACT_MS = navigator.webdriver ? 850 : 17000;
+const BLACK_HOLE_TESSERACT_MS = navigator.webdriver ? 1800 : 8200;
 const BLACK_HOLE_COUNTDOWN_DELAY_MS = navigator.webdriver ? 800 : 4000;
 const BLACK_HOLE_ENTRY_MS = BLACK_HOLE_VOID_MS + BLACK_HOLE_APPROACH_MS;
 const BLACK_HOLE_SEQUENCE_MS = BLACK_HOLE_ENTRY_MS + BLACK_HOLE_TESSERACT_MS;
@@ -401,7 +411,7 @@ function clearStarting() {
 function crashedLastStart() {
   try {
     const t = Number(sessionStorage.getItem(START_FLAG) || 0);
-    return t > 0 && Date.now() - t < 60000;
+    return t > 0;
   } catch {
     return false;
   }
@@ -415,8 +425,16 @@ function lastError() {
 function clearError() {
   try { sessionStorage.removeItem(LAST_ERR); } catch { /* ignore */ }
 }
+const interruptedStartAtBoot = isMobile && (
+  crashedLastStart() || lastError().includes("while loading terrain")
+);
+const reportedDeviceMemory = Number(navigator.deviceMemory || 0);
+const memorySafeMode = isMobile && (
+  interruptedStartAtBoot || (reportedDeviceMemory > 0 && reportedDeviceMemory <= 4)
+);
 const liteMode = isMobile;
 if (liteMode) document.body.classList.add("lite");
+if (memorySafeMode) document.body.classList.add("memory-safe");
 let loadError = null;
 let frameCount = 0;
 let firstPersonActive = false;
@@ -425,7 +443,11 @@ let detailCameraRegistered = 0;
 let terrainDetailChangedAt = 0;
 let terrainStreamingProfile = null;
 let terrainStreamingKey = "";
+let terrainBaseParseJobs = 1;
 let unloadTilesPlugin = null;
+let lastSurfaceProbeAt = -Infinity;
+let lastWingProbeAt = -Infinity;
+let lastCameraProbeAt = -Infinity;
 let streetModeActive = false;
 let externalStreetWindow = null;
 let selectedPlane = "pa28";
@@ -509,7 +531,7 @@ const mp = {
   talkers: new Set(),
 };
 
-const ctrl = { roll: 0, pitch: 0, throttle: 0 };
+const ctrl = { roll: 0, pitch: 0, throttle: 0, cameraClimb: 0 };
 const keys = new Set();
 const raycaster = new Raycaster();
 raycaster.firstHitOnly = true;
@@ -517,6 +539,8 @@ const cameraRaycaster = new Raycaster();
 cameraRaycaster.firstHitOnly = true;
 const cameraCollisionDir = new Vector3();
 let cameraObstacleDistance = null;
+const groundContact = new ContactConfirmation(2);
+const wingContact = new ContactConfirmation(2);
 const clock = new Clock();
 
 const el = {
@@ -575,19 +599,27 @@ const el = {
   stickKnob: document.getElementById("stick-knob"),
   touchBoost: document.getElementById("touch-boost"),
   touchBrake: document.getElementById("touch-brake"),
+  touchCamera: document.getElementById("touch-camera"),
   touchTalk: document.getElementById("touch-talk"),
   touchAction: document.getElementById("touch-action"),
+  touchSpecial: document.getElementById("touch-special"),
+  touchEnter: document.getElementById("touch-enter"),
+  rotateHint: document.getElementById("rotate-hint"),
+  rotateDismiss: document.getElementById("rotate-dismiss"),
   spaceNav: document.getElementById("space-nav"),
   spaceModeLabel: document.getElementById("space-mode-label"),
   spaceTargetInfo: document.getElementById("space-target-info"),
   spaceEnter: document.getElementById("space-enter"),
+  spaceActionHint: document.getElementById("space-action-hint"),
+  spaceActionKey: document.getElementById("space-action-key"),
+  spaceActionCopy: document.getElementById("space-action-copy"),
   planetEntry: document.getElementById("planet-entry"),
   planetEntryTitle: document.getElementById("planet-entry-title"),
   planetEntryDetail: document.getElementById("planet-entry-detail"),
   interstellar: document.getElementById("interstellar"),
   transitStatus: document.getElementById("transit-status"),
   transitCountdown: document.getElementById("transit-countdown"),
-  tesseractCanvas: document.getElementById("tesseract-canvas"),
+  tesseractVideo: document.getElementById("tesseract-video"),
   locationArrival: document.getElementById("location-arrival"),
   lobbyCarCanvas: document.getElementById("lobby-carousel-canvas"),
   lobbyCarPrev: document.getElementById("lobby-car-prev"),
@@ -739,19 +771,21 @@ function hideFatal() {
   if (el.fatal) el.fatal.classList.add("hidden");
 }
 
+let crashHintShown = false;
 function showCrashHints() {
-  const died = crashedLastStart();
+  if (crashHintShown) return;
   const prev = lastError();
-  if (!died && !prev) return;
-  const text = died
-    ? (prev || "Last start crashed this phone (usually out of memory). Using the lightest graphics — tap Start again.")
+  if (!interruptedStartAtBoot && !prev) return;
+  crashHintShown = true;
+  const text = interruptedStartAtBoot
+    ? "The previous terrain load was interrupted. Memory-safe mode is active — choose Single player and start again."
     : prev;
   if (el.crashNote) {
     el.crashNote.hidden = false;
     el.crashNote.textContent = text;
   }
   if (el.menuError) el.menuError.textContent = text;
-  if (died) showFatal(text);
+  clearError();
 }
 
 el.fatalOk?.addEventListener("click", () => hideFatal());
@@ -1798,17 +1832,21 @@ function init() {
   tiles.registerPlugin(new TileCompressionPlugin({ disableMipmaps: false }));
   tiles.registerPlugin(new UpdateOnChangePlugin());
   unloadTilesPlugin = new UnloadTilesPlugin({
-    delay: isMobile ? 3500 : 12000,
-    bytesTarget: isMobile ? 150e6 : 380e6,
+    delay: memorySafeMode ? 1200 : isMobile ? 2500 : 12000,
+    bytesTarget: memorySafeMode ? 72e6 : isMobile ? 110e6 : 380e6,
   });
   tiles.registerPlugin(unloadTilesPlugin);
-  tiles.registerPlugin(new TilesFadePlugin({ fadeDuration: 120, maximumFadeOutTiles: 24 }));
+  tiles.registerPlugin(new TilesFadePlugin({
+    fadeDuration: 120,
+    maximumFadeOutTiles: memorySafeMode ? 8 : isMobile ? 16 : 24,
+  }));
   const draco = new DRACOLoader();
   draco.setDecoderPath("https://www.gstatic.com/draco/versioned/decoders/1.5.7/");
   tiles.registerPlugin(new GLTFExtensionsPlugin({ dracoLoader: draco }));
   const cpuThreads = navigator.hardwareConcurrency || 4;
-  tiles.parseQueue.maxJobs = isMobile ? 2 : Math.max(2, Math.min(3, Math.floor(cpuThreads / 2)));
-  tiles.downloadQueue.maxJobsPerOrigin = isMobile ? 6 : 8;
+  terrainBaseParseJobs = memorySafeMode ? 1 : isMobile ? 2 : Math.max(2, Math.min(3, Math.floor(cpuThreads / 2)));
+  tiles.parseQueue.maxJobs = terrainBaseParseJobs;
+  tiles.downloadQueue.maxJobsPerOrigin = memorySafeMode ? 3 : isMobile ? 4 : 8;
   tiles.errorFalloffDensity = 1e-3;
   tiles.group.rotation.x = -Math.PI / 2;
   tiles.group.visible = false;
@@ -2018,6 +2056,12 @@ function resetFlight(latDeg, lonDeg) {
   shake = 0;
   ctrl.roll = 0;
   ctrl.pitch = 0;
+  ctrl.cameraClimb = 0;
+  lastSurfaceProbeAt = -Infinity;
+  lastWingProbeAt = -Infinity;
+  lastCameraProbeAt = -Infinity;
+  groundContact.reset();
+  wingContact.reset();
   camInit = false;
   if (planeMesh) planeMesh.visible = true;
   hideBanner();
@@ -2038,26 +2082,27 @@ function onResize() {
   renderer.setSize(innerWidth, innerHeight);
 }
 
-function frameAt(lat, lon, height, az, elv, roll) {
-  const m = new Matrix4();
-  WGS84_ELLIPSOID.getObjectFrame(lat, lon, height, az, elv, roll, m, CAMERA_FRAME);
-  m.premultiply(tiles.group.matrixWorld);
-  return m;
+function frameAt(lat, lon, height, az, elv, roll, target = new Matrix4()) {
+  WGS84_ELLIPSOID.getObjectFrame(lat, lon, height, az, elv, roll, target, CAMERA_FRAME);
+  target.premultiply(tiles.group.matrixWorld);
+  return target;
 }
 
+const _beaconFrame = new Matrix4();
+const _groundOrigin = new Vector3();
+const _groundDown = new Vector3();
+const _groundPoint = new Vector3();
 function probeGround(lat, lon, refHeight) {
-  const origin = new Vector3();
-  WGS84_ELLIPSOID.getCartographicToPosition(lat, lon, refHeight + 100, origin);
-  origin.applyMatrix4(tiles.group.matrixWorld);
-  const dir = origin.clone().normalize().negate();
-  raycaster.set(origin, dir);
+  WGS84_ELLIPSOID.getCartographicToPosition(lat, lon, refHeight + 100, _groundOrigin);
+  _groundOrigin.applyMatrix4(tiles.group.matrixWorld);
+  _groundDown.copy(_groundOrigin).normalize().negate();
+  raycaster.set(_groundOrigin, _groundDown);
   raycaster.far = refHeight + 1200; // musi sięgnąć poziomu morza nawet z wysokiego spawnu
-  const hits = raycaster.intersectObject(tiles.group, true);
-  if (hits.length > 0) {
+  const hit = raycastTerrain(tiles, raycaster);
+  if (hit) {
     const lla = {};
-    const p = hits[0].point.clone();
-    p.applyMatrix4(tiles.group.matrixWorld.clone().invert());
-    WGS84_ELLIPSOID.getPositionToCartographic(p, lla);
+    _groundPoint.copy(hit.point).applyMatrix4(tiles.group.matrixWorldInverse);
+    WGS84_ELLIPSOID.getPositionToCartographic(_groundPoint, lla);
     return lla.height;
   }
   return null;
@@ -2071,10 +2116,10 @@ function hitTerrainAt(worldPos, margin) {
   _rayOrigin.copy(worldPos).addScaledVector(_rayDown, -600);
   raycaster.set(_rayOrigin, _rayDown);
   raycaster.far = 1200;
-  const hits = raycaster.intersectObject(tiles.group, true);
-  if (!hits.length) return false;
+  const hit = raycastTerrain(tiles, raycaster);
+  if (!hit) return false;
   // AGL punktu = dystans promienia - 600; kraksa gdy punkt jest <= margin nad terenem
-  return hits[0].distance - 600 < margin;
+  return hit.distance - 600 < margin;
 }
 
 const _rightWing = new Vector3();
@@ -2104,7 +2149,7 @@ function placeBeaconAt(latDeg, lonDeg) {
   const gh = probeGround(latDeg * (Math.PI / 180), lonDeg * (Math.PI / 180), TERRAIN_ALT + 200);
   const base = gh !== null ? gh : TERRAIN_ALT;
   beaconGrounded = gh !== null;
-  const m = frameAt(latDeg * (Math.PI / 180), lonDeg * (Math.PI / 180), base, 0, 0, 0);
+  const m = frameAt(latDeg * (Math.PI / 180), lonDeg * (Math.PI / 180), base, 0, 0, 0, _beaconFrame);
   m.decompose(beacon.position, beacon.quaternion, beacon.scale);
 }
 
@@ -2447,6 +2492,13 @@ el.gmRetry.addEventListener("click", () => {
   restartMode();
 });
 
+function resetCameraView() {
+  orbit.yaw = 0;
+  orbit.pitch = 0.25;
+  orbit.zoom = 1;
+  camInit = false;
+}
+
 window.addEventListener("keydown", (e) => {
   if (streetModeActive && (e.key === "Escape" || e.key === " ")) {
     e.preventDefault();
@@ -2482,7 +2534,7 @@ window.addEventListener("keydown", (e) => {
     handleSpaceEntryAction();
     return;
   }
-  if (k === "c" && !e.repeat) { orbit.yaw = 0; orbit.pitch = 0.25; orbit.zoom = 1; }
+  if (k === "c" && !e.repeat) resetCameraView();
   if (k === " " && !e.repeat) tryParachutistLaunch("gentle");
   if (k === "r" && !e.repeat && !crashed && !finished) {
     if (selectedPlane === "rocket") handleRocketAction();
@@ -2505,12 +2557,15 @@ document.addEventListener('visibilitychange', () => {
   else if (streetModeActive && externalStreetWindow?.closed) leaveStreetView();
 });
 function clearFlightInput() {
-  keys.clear(); ctrl.roll = 0; ctrl.pitch = 0; ctrl.throttle = 0;
+  keys.clear(); ctrl.roll = 0; ctrl.pitch = 0; ctrl.throttle = 0; ctrl.cameraClimb = 0;
   resetStick(); touch.boost = false; touch.brake = false; stopTalk();
   if (!menuOpen && !guessOpen && !streetModeActive) setPaused(true);
 }
 
 const touch = { roll: 0, pitch: 0, boost: false, brake: false, pid: null };
+const ROTATE_HINT_KEY = "fotw-rotate-hint-dismissed";
+let rotateHintDismissed = false;
+try { rotateHintDismissed = sessionStorage.getItem(ROTATE_HINT_KEY) === "1"; } catch { /* optional */ }
 
 function resetStick() {
   touch.roll = 0;
@@ -2583,30 +2638,78 @@ el.touchAction?.addEventListener("click", () => {
   if (selectedPlane === "rocket") handleRocketAction();
   else tryParachutistLaunch("gentle");
 });
+el.touchSpecial?.addEventListener("click", () => tryParachutistLaunch("rocket"));
+el.touchEnter?.addEventListener("click", handleSpaceEntryAction);
+el.touchCamera?.addEventListener("click", resetCameraView);
 el.touchPause?.addEventListener("click", () => setPaused(true));
+el.rotateDismiss?.addEventListener("click", () => {
+  rotateHintDismissed = true;
+  el.rotateHint?.classList.remove("show");
+  try { sessionStorage.setItem(ROTATE_HINT_KEY, "1"); } catch { /* optional */ }
+});
 el.stick?.addEventListener("touchmove", (e) => e.preventDefault(), { passive: false });
 
 function syncTouchUi() {
   if (!el.touch) return;
   const show = !menuOpen && !paused && !guessOpen && !crashed && !finished && !streetModeActive;
+  const nearestSpaceBody = spaceModeActive ? spaceFlight.nearestBody() : null;
+  const orbitBody = spaceFlight.orbitBody ? spaceFlight.bodies.get(spaceFlight.orbitBody) : null;
+  const canEnterOrbit = !!nearestSpaceBody
+    && !nearestSpaceBody.body.hazard
+    && nearestSpaceBody.distance <= SPACE_ORBIT_HINT_DISTANCE
+    && !spaceFlight.orbitBody
+    && !spaceFlight.surfaceBody
+    && !spaceLandedBody
+    && !spaceEntryBody
+    && !blackHoleSequence;
   el.touch.classList.toggle("hidden", !show);
   el.touch.classList.toggle("show", show);
   el.touch.classList.toggle("talk", !!(mp.active && mp.net));
+  const portraitPhone = isMobile && innerHeight > innerWidth;
+  el.rotateHint?.classList.toggle("show", show && portraitPhone && !rotateHintDismissed);
   if (el.touchAction) {
     const isParachutist = selectedPlane === "parachutist";
     const isRocket = selectedPlane === "rocket";
     const canLaunch = isParachutist && plane?.state === "grounded";
-    el.touchAction.disabled = isParachutist ? !canLaunch : !isRocket || !!rocketLaunch || !!earthReentry;
+    const takingOff = isParachutist && plane?.state === "launching";
+    const hideSpaceAction = spaceModeActive && (!!spaceEntryBody || blackHoleSequence);
+    el.touchAction.hidden = isParachutist ? !canLaunch && !takingOff : !isRocket || hideSpaceAction;
+    el.touchAction.disabled = isParachutist
+      ? !canLaunch
+      : !isRocket || !!rocketLaunch || !!earthReentry || (spaceModeActive && !spaceFlight.orbitBody && !spaceFlight.surfaceBody && !spaceLandedBody && !canEnterOrbit);
     el.touchAction.textContent = isRocket
       ? spaceModeActive
-        ? spaceFlight.surfaceBody ? "Return to orbit" : "Orbit assist"
+        ? spaceFlight.surfaceBody || spaceLandedBody
+          ? "Return to orbit"
+          : spaceFlight.orbitBody
+            ? `Release ${spaceFlight.orbitBody} orbit`
+            : canEnterOrbit
+              ? `Enter ${nearestSpaceBody.body.name} orbit`
+              : "Approach a planet"
         : earthReentry ? "Reentering…" : rocketLaunch ? "Launching…" : "Launch to orbit"
       : canLaunch ? "Gentle takeoff" : plane?.state === "launching" ? "Taking off…" : "Land to take off";
   }
+  if (el.touchSpecial) {
+    const canHighLaunch = selectedPlane === "parachutist" && plane?.state === "grounded";
+    el.touchSpecial.hidden = !canHighLaunch;
+    el.touchSpecial.disabled = !canHighLaunch;
+  }
+  if (el.touchEnter) {
+    const canEnterPlanet = spaceModeActive && !!orbitBody && !orbitBody.hazard && !blackHoleSequence && !spaceEntryBody;
+    el.touchEnter.hidden = !canEnterPlanet;
+    el.touchEnter.disabled = !canEnterPlanet;
+    el.touchEnter.textContent = orbitBody
+      ? orbitBody.name === "Earth"
+        ? "Enter Earth atmosphere"
+        : `Enter ${orbitBody.name}${orbitBody.gasGiant ? " atmosphere" : ""}`
+      : "Enter planet";
+  }
+  if (el.touchTalk) el.touchTalk.hidden = !(mp.active && mp.net);
   if (!show) {
     resetStick();
     touch.boost = false;
     touch.brake = false;
+    el.rotateHint?.classList.remove("show");
   }
 }
 
@@ -2632,6 +2735,56 @@ const spaceCtrl = { roll: 0, pitch: 0, throttle: 0 };
 function setSpaceNotice(message, duration = 2600) {
   spaceNotice = message;
   spaceNoticeUntil = performance.now() + duration;
+}
+
+const SPACE_ORBIT_HINT_DISTANCE = 260;
+const SPACE_ACTION_HINT_DURATION = 4000;
+
+function resetSpaceActionHint() {
+  spaceActionHintContext = "";
+  spaceActionHintUntil = 0;
+  if (el.spaceActionHint) el.spaceActionHint.hidden = true;
+  el.touchAction?.classList.remove("space-context-ready");
+  el.touchEnter?.classList.remove("space-context-ready");
+}
+
+function updateSpaceActionHint(nearest, now = performance.now()) {
+  let next = null;
+  const unavailable = !spaceModeActive || blackHoleSequence || spaceEntryBody || spaceLandedBody || spaceFlight.surfaceBody;
+  if (!unavailable && spaceFlight.orbitBody) {
+    const body = spaceFlight.bodies.get(spaceFlight.orbitBody);
+    if (body && !body.hazard) {
+      next = {
+        context: `orbit:${body.name}`,
+        key: "E",
+        copy: body.name === "Earth"
+          ? "Return through Earth's atmosphere"
+          : `Enter ${body.name}${body.gasGiant ? "'s atmosphere" : ""}`,
+      };
+    }
+  } else if (!unavailable && nearest?.body && !nearest.body.hazard && nearest.distance <= SPACE_ORBIT_HINT_DISTANCE) {
+    next = {
+      context: `near:${nearest.body.name}`,
+      key: "R",
+      copy: `Enter ${nearest.body.name} orbit`,
+    };
+  }
+
+  const nextContext = next?.context || "";
+  if (nextContext !== spaceActionHintContext) {
+    spaceActionHintContext = nextContext;
+    spaceActionHintUntil = next ? now + SPACE_ACTION_HINT_DURATION : 0;
+  }
+
+  const visible = !!next && now < spaceActionHintUntil;
+  if (el.spaceActionHint) el.spaceActionHint.hidden = !visible;
+  if (visible) {
+    if (el.spaceActionKey) el.spaceActionKey.textContent = next.key;
+    if (el.spaceActionCopy) el.spaceActionCopy.textContent = next.copy;
+  }
+  el.touchAction?.classList.toggle("space-context-ready", visible && next?.key === "R");
+  el.touchEnter?.classList.toggle("space-context-ready", visible && next?.key === "E");
+  return visible ? next : null;
 }
 
 function selectSpaceTarget(indexOrName) {
@@ -2818,9 +2971,39 @@ function showCooperFarmArrival() {
   el.locationArrival.setAttribute("aria-hidden", "false");
 }
 
+function stopTesseractVideo() {
+  const video = el.tesseractVideo;
+  if (!video) return;
+  video.pause();
+  try { video.currentTime = 0; } catch { /* metadata may not be ready yet */ }
+}
+
+function prepareTesseractVideo() {
+  const video = el.tesseractVideo;
+  if (!video) return;
+  tesseractVideoError = "";
+  video.muted = true;
+  video.defaultMuted = true;
+  video.playsInline = true;
+  video.preload = "auto";
+  video.pause();
+  if (video.readyState === 0) video.load();
+  try { video.currentTime = 0; } catch { /* poster covers the metadata wait */ }
+}
+
+function playTesseractVideo() {
+  const video = el.tesseractVideo;
+  if (!video) return;
+  try { video.currentTime = 0; } catch { /* play() will start at the beginning */ }
+  const playback = video.play();
+  playback?.catch((error) => {
+    tesseractVideoError = error?.message || "Tesseract video playback failed";
+  });
+}
+
 function finishInterstellarJump() {
   if (!spaceModeActive || !blackHoleSequence) return;
-  tesseractTransit?.stop();
+  stopTesseractVideo();
   if (blackHoleTimer) clearTimeout(blackHoleTimer);
   if (blackHolePhaseTimer) clearTimeout(blackHolePhaseTimer);
   if (blackHoleEntryTimer) clearTimeout(blackHoleEntryTimer);
@@ -2877,15 +3060,15 @@ function triggerInterstellarJump() {
   planeMesh.visible = false;
   document.body.classList.remove("hyperdrive");
   document.body.classList.add("black-hole-transit");
-  el.interstellar?.classList.remove("tesseract-phase");
+  el.interstellar?.classList.remove("tesseract-phase", "countdown-only", "approach-phase");
   el.interstellar?.classList.add("show", "silent-void");
+  el.interstellar?.style.setProperty("--tesseract-approach-duration", `${BLACK_HOLE_APPROACH_MS}ms`);
   el.interstellar?.setAttribute("aria-hidden", "false");
   el.transitCountdown?.setAttribute("aria-hidden", "true");
   el.transitStatus?.setAttribute("aria-hidden", "true");
   if (el.transitStatus) el.transitStatus.textContent = "EVENT HORIZON · TELEMETRY LOST";
   const transitStartedAt = blackHoleSequenceStartedAt;
-  if (!tesseractTransit && el.tesseractCanvas) tesseractTransit = new TesseractTransit(el.tesseractCanvas);
-  tesseractTransit?.start(transitStartedAt, "void", BLACK_HOLE_VOID_MS);
+  prepareTesseractVideo();
   const updateCountdown = () => {
     if (!el.transitCountdown || !["void", "approach"].includes(blackHolePhase)) return;
     const remaining = Math.max(1, Math.ceil((BLACK_HOLE_ENTRY_MS - (performance.now() - transitStartedAt)) / 1000));
@@ -2904,7 +3087,6 @@ function triggerInterstellarJump() {
   blackHolePhaseTimer = setTimeout(() => {
     blackHolePhase = "approach";
     el.interstellar?.classList.add("approach-phase");
-    tesseractTransit?.setPhase("approach", performance.now(), BLACK_HOLE_APPROACH_MS);
     if (el.transitStatus) el.transitStatus.textContent = "UNKNOWN STRUCTURE · RAPID APPROACH";
     blackHolePhaseTimer = null;
   }, BLACK_HOLE_VOID_MS);
@@ -2915,7 +3097,7 @@ function triggerInterstellarJump() {
     blackHoleCountdownTimer = null;
     el.interstellar?.classList.remove("countdown-only", "approach-phase");
     el.interstellar?.classList.add("tesseract-phase");
-    tesseractTransit?.setPhase("transit", blackHoleTesseractStartedAt, BLACK_HOLE_TESSERACT_MS);
+    playTesseractVideo();
     el.transitCountdown?.setAttribute("aria-hidden", "true");
     el.transitStatus?.setAttribute("aria-hidden", "false");
     if (el.transitStatus) el.transitStatus.textContent = "GRAVITATIONAL TESSERACT · TEMPORAL ECHOES";
@@ -3092,6 +3274,7 @@ function leaveSpaceFlight() {
   spaceFlight.reset();
   spaceNotice = "";
   spaceNoticeUntil = 0;
+  resetSpaceActionHint();
   spaceEnvironmentMessage = "";
   spaceEntryBody = null;
   spaceLandedBody = null;
@@ -3113,7 +3296,7 @@ function leaveSpaceFlight() {
   blackHoleCaptureProgress = 0;
   blackHoleSequenceStartedAt = 0;
   blackHoleTesseractStartedAt = 0;
-  tesseractTransit?.stop();
+  stopTesseractVideo();
   interstellarArrivalPending = false;
   interstellarArrivalStartedAt = 0;
   hidePlanetEntryVisual();
@@ -3183,7 +3366,6 @@ function tickSpaceFrame(dt, rawDt, flying) {
       finishInterstellarJump();
       return;
     }
-    tesseractTransit?.render(transitNow);
     setBlackHoleTransitProgress(blackHolePhase === "tesseract"
       ? Math.max(0, Math.min(1, (transitNow - blackHoleTesseractStartedAt) / BLACK_HOLE_TESSERACT_MS))
       : 0);
@@ -3284,6 +3466,7 @@ function tickSpaceFrame(dt, rawDt, flying) {
   renderer.render(scene, camera);
 
   const nearest = spaceFlight.nearestBody();
+  const spaceActionHint = updateSpaceActionHint(nearest);
   const orbitLabel = blackHoleSequence
     ? blackHolePhase === "tesseract"
       ? "GRAVITATIONAL TESSERACT"
@@ -3325,6 +3508,7 @@ function tickSpaceFrame(dt, rawDt, flying) {
     spaceSpeed: spaceFlight.speed,
     hyperdrive: spaceFlight.hyperdrive,
     orbitBody: spaceFlight.orbitBody,
+    spaceActionHint: spaceActionHint ? { key: spaceActionHint.key, context: spaceActionHint.context } : null,
     target: spaceFlight.targetName,
     targetDistance: spaceFlight.targetDistance(),
     spaceEntryBody,
@@ -3333,6 +3517,16 @@ function tickSpaceFrame(dt, rawDt, flying) {
     spaceEntryTransition: spaceEntryTransition ? { ...spaceEntryTransition } : null,
     blackHoleSequence,
     blackHolePhase,
+    tesseractVideo: el.tesseractVideo ? {
+      currentTime: Math.round(el.tesseractVideo.currentTime * 1000) / 1000,
+      duration: Number.isFinite(el.tesseractVideo.duration) ? Math.round(el.tesseractVideo.duration * 1000) / 1000 : null,
+      paused: el.tesseractVideo.paused,
+      readyState: el.tesseractVideo.readyState,
+      videoWidth: el.tesseractVideo.videoWidth,
+      videoHeight: el.tesseractVideo.videoHeight,
+      muted: el.tesseractVideo.muted,
+      error: tesseractVideoError || el.tesseractVideo.error?.message || "",
+    } : null,
     blackHoleGravity: blackHoleGravity ? { ...blackHoleGravity } : null,
     blackHoleCaptureProgress,
     blackHoleCameraShake: captureShake,
@@ -3384,12 +3578,19 @@ const camTarget = new Vector3();
 const planePos = new Vector3();
 const planeQuat = new Quaternion();
 const offset = new Vector3();
+const cameraLocalOffset = new Vector3();
+const cameraLocalGoal = new Vector3();
 const camFramePos = new Vector3();
 const camFrameQuat = new Quaternion();
 const camFrameScale = new Vector3();
 const skyQuat = new Quaternion(); // lokalna ramka N/S (bez kursu) — dla kopuły nieba i słońca
 const skyFramePos = new Vector3();
 const skyFrameScale = new Vector3();
+const planeFrameMatrix = new Matrix4();
+const mateFrameMatrix = new Matrix4();
+const chaseFrameMatrix = new Matrix4();
+const skyFrameMatrix = new Matrix4();
+const detailFrameMatrix = new Matrix4();
 let camInit = false;
 
 const adaptiveQuality = new AdaptiveQuality();
@@ -3402,6 +3603,25 @@ streetViewLink.textContent = 'Enter Street View';
 streetViewLink.hidden = true;
 document.body.append(streetViewLink);
 const credits = document.createElement('div'); credits.id = 'map-credits'; document.body.append(credits);
+const attributionEntries = [];
+let mapCreditsSignature = "";
+let mapCreditsRenderCount = 0;
+
+function refreshMapCredits() {
+  attributionEntries.length = 0;
+  const entries = tiles.getAttributions(attributionEntries);
+  const hasTerrain = tiles.visibleTiles.size > 0;
+  const signature = `${hasTerrain ? 1 : 0}:${attributionSignature(entries)}`;
+  if (signature === mapCreditsSignature) return;
+  mapCreditsSignature = signature;
+  renderAttributions(credits, entries);
+  if (hasTerrain) {
+    const source = document.createElement('span');
+    source.textContent = 'Terrain: Google Maps';
+    credits.prepend(source);
+  }
+  mapCreditsRenderCount += 1;
+}
 const settingsUI = setupSettings(() => { adaptiveQuality.reset(); applyQuality(); }, () => { if (!menuOpen) setPaused(true); });
 setupLocationPicker(() => { if (!menuOpen) setPaused(true); });
 const orbit = { yaw:0, pitch:0.25, zoom:1, dragging:false };
@@ -3478,25 +3698,37 @@ function applyQuality() {
 
 function setTerrainDetail(modeName) {
   if (!tiles) return;
+  let changed = false;
   if (modeName !== terrainDetailMode) {
     terrainDetailMode = modeName;
     terrainDetailChangedAt = performance.now();
     terrainStreamingKey = "";
+    changed = true;
   }
-  tuneTerrainStreaming();
+  // Motion and FPS thresholds do not need to rebuild the profile every frame.
+  // Sampling four times per second reacts quickly without adding hot-loop GC.
+  if (changed || !terrainStreamingProfile || frameCount % 15 === 0) tuneTerrainStreaming();
 }
 
 function tuneTerrainStreaming() {
   const cacheFull = Boolean(tiles?.lruCache?.isFull?.());
-  const profile = terrainStreamProfile(terrainDetailMode, adaptiveQuality.lastFps, isMobile, cacheFull);
+  const fastFlight = !spaceModeActive
+    && !menuOpen
+    && !paused
+    && !!plane
+    && selectedPlane !== "parachutist"
+    && (plane.speed >= 120 || (plane.speed >= 90 && Math.abs(ctrl.roll) >= 0.25));
+  const profile = terrainStreamProfile(terrainDetailMode, adaptiveQuality.lastFps, isMobile, cacheFull, memorySafeMode, fastFlight);
   const q = QUALITY[settings.quality];
-  const profileKey = [terrainDetailMode, profile.error, profile.maxTilesProcessed, profile.prefetch, cacheFull].join(":");
-  terrainStreamingProfile = profile;
+  const parseJobs = Math.min(terrainBaseParseJobs, profile.maxConcurrentParses || terrainBaseParseJobs);
+  const profileKey = [terrainDetailMode, profile.error, profile.maxTilesProcessed, parseJobs, profile.prefetch, cacheFull].join(":");
+  terrainStreamingProfile = { ...profile, fastFlight, parseJobs };
   if (profileKey === terrainStreamingKey) return profile;
   terrainStreamingKey = profileKey;
   tiles.errorTarget = Math.min(q.error, profile.error);
   tiles.errorFalloff = profile.errorFalloff;
   tiles.maxTilesProcessed = profile.maxTilesProcessed;
+  tiles.parseQueue.maxJobs = parseJobs;
   tiles.lruCache.maxSize = profile.cacheTiles;
   tiles.lruCache.minSize = Math.round(profile.cacheTiles * 0.48);
   tiles.lruCache.maxBytesSize = profile.cacheBytes;
@@ -3512,9 +3744,7 @@ function updateDetailCamera() {
   const modeAge = performance.now() - terrainDetailChangedAt;
   const streetSweep = terrainDetailMode === "street";
   const active = terrainDetailMode === "landing" || streetSweep;
-  const profile = frameCount % 45 === 0 || !terrainStreamingProfile
-    ? tuneTerrainStreaming()
-    : terrainStreamingProfile;
+  const profile = terrainStreamingProfile || tuneTerrainStreaming();
   if (!active) {
     while (detailCameraRegistered > 0) {
       detailCameraRegistered -= 1;
@@ -3541,7 +3771,7 @@ function updateDetailCamera() {
     const detailCamera = detailCameras[i];
     const sweepSector = streetSweep ? 1 + Math.floor((modeAge - 3500) / 1600) % 3 : 1;
     const detailHeading = plane.heading + sweepSector * Math.PI / 2;
-    const matrix = frameAt(plane.lat, plane.lon, detailHeight, detailHeading, -0.06, 0);
+    const matrix = frameAt(plane.lat, plane.lon, detailHeight, detailHeading, -0.06, 0, detailFrameMatrix);
     matrix.decompose(detailCamera.position, detailCamera.quaternion, detailCamera.scale);
     detailCamera.updateMatrixWorld(true);
     tiles.setResolution(detailCamera, width, Math.round(width * 9 / 16));
@@ -3564,16 +3794,6 @@ window.addEventListener("unhandledrejection", (e) => {
   if (awaitingSnap || !menuOpen) showFatal(msg);
   else if (el.menuError) el.menuError.textContent = msg;
 });
-window.addEventListener("pagehide", () => {
-  try {
-    if (sessionStorage.getItem(START_FLAG)) {
-      rememberError("Phone closed the tab while loading terrain — usually out of memory. Light mode is on; tap Start again.");
-    }
-  } catch {
-    /* ignore */
-  }
-});
-
 function animate(now = performance.now()) {
   if (window.__ctxLost) return;
   // Headless browser tests do not need a full-rate 3D simulation. Capping the
@@ -3597,6 +3817,7 @@ function tickFrame() {
   if (!tiles || !plane) return;
 
   const rawDt = clock.getDelta();
+  const frameNow = performance.now();
   if (document.hidden) return;
   const dt = Math.min(rawDt, 0.05);
   if (!menuOpen && !paused) {
@@ -3619,6 +3840,10 @@ function tickFrame() {
   const pitchIn = keyPitch || touch.pitch;
   ctrl.roll += (rollIn - ctrl.roll) * Math.min(1, 6 * dt);
   ctrl.pitch += (pitchIn - ctrl.pitch) * Math.min(1, 6 * dt);
+  const cameraClimbTarget = selectedPlane === "parachutist" && plane?.state !== "grounded"
+    ? parachutistCameraClimbAssist(orbit.pitch, orbit.dragging)
+    : 0;
+  ctrl.cameraClimb += (cameraClimbTarget - ctrl.cameraClimb) * Math.min(1, 8 * dt);
   ctrl.throttle = touch.boost || keys.has("shift") ? 1 : touch.brake || keys.has("control") ? -1 : 0;
 
   if (spaceModeActive) {
@@ -3663,7 +3888,7 @@ function tickFrame() {
   updateMusic();
 
   // pozycja i orientacja samolotu
-  const m = frameAt(plane.lat, plane.lon, plane.height, plane.heading, plane.pitch, -plane.roll);
+  const m = frameAt(plane.lat, plane.lon, plane.height, plane.heading, plane.pitch, -plane.roll, planeFrameMatrix);
   m.decompose(planePos, planeQuat, planeMesh.scale);
   planeMesh.position.copy(planePos);
   planeMesh.quaternion.copy(planeQuat);
@@ -3742,7 +3967,8 @@ function tickFrame() {
         from.h + (to.h - from.h) * u,
         lerpAngle(from.heading, to.heading, u),
         from.pitch + (to.pitch - from.pitch) * u,
-        -(from.roll + (to.roll - from.roll) * u)
+        -(from.roll + (to.roll - from.roll) * u),
+        mateFrameMatrix,
       );
       mm.decompose(matePos, mateQuat, mateScale);
       mate.mesh.position.copy(matePos);
@@ -3767,7 +3993,7 @@ function tickFrame() {
   }
 
   // sztywna kamera za samolotem — tylko kurs, bez przechyłu/pochylenia
-  const camFrame = frameAt(plane.lat, plane.lon, plane.height, plane.heading, rocketLaunch || earthReentry ? plane.pitch : 0, 0);
+  const camFrame = frameAt(plane.lat, plane.lon, plane.height, plane.heading, rocketLaunch || earthReentry ? plane.pitch : 0, 0, chaseFrameMatrix);
   camFrame.decompose(camFramePos, camFrameQuat, camFrameScale);
   const firstPerson = selectedPlane === "parachutist" && !menuOpen && orbit.zoom <= 0.56;
   if (firstPerson !== firstPersonActive) {
@@ -3782,6 +4008,9 @@ function tickFrame() {
   }
   setParachutistFirstPerson(planeMesh, firstPerson);
   const farmArrivalCamera = selectedPlane === "rocket" && (interstellarArrivalPending || cooperFarmRocketReady);
+  const launchCameraPhase = rocketLaunch
+    ? rocketLaunchCameraPhase((frameNow - rocketLaunch.startedAt) / 1000)
+    : 0;
   const cameraProfile = rocketLaunch
     ? [0, 3.1, 10.5]
     : earthReentry ? [0, 4.3, 15]
@@ -3792,10 +4021,29 @@ function tickFrame() {
     camPos.copy(offset);
   } else {
     const cameraZoom = rocketLaunch ? Math.min(1, orbit.zoom) : earthReentry ? Math.min(1.08, orbit.zoom) : orbit.zoom;
-    const radius = Math.hypot(cameraProfile[1], cameraProfile[2]) * cameraZoom;
-    offset.set(Math.sin(orbit.yaw) * Math.cos(orbit.pitch) * radius, Math.sin(orbit.pitch) * radius, Math.cos(orbit.yaw) * Math.cos(orbit.pitch) * radius).applyQuaternion(camFrameQuat).add(planePos);
-    if (!camInit || rocketLaunch || earthReentry || farmArrivalCamera) camPos.copy(offset);
-    else camPos.lerp(offset, 1 - Math.exp(-12 * dt));
+    if (rocketLaunch) {
+      // Begin directly behind the rocket, then move above and well off-axis.
+      // The final three-quarter view keeps its nose, the receding ground and
+      // the darkening sky in the same frame throughout the atmospheric climb.
+      cameraLocalGoal.set(
+        -Math.sin(launchCameraPhase * Math.PI * 0.5) * 7,
+        3.1 + launchCameraPhase * 14.4,
+        10.5 - launchCameraPhase * 20.5,
+      ).multiplyScalar(cameraZoom);
+    } else {
+      const radius = Math.hypot(cameraProfile[1], cameraProfile[2]) * cameraZoom;
+      cameraLocalGoal.set(
+        Math.sin(orbit.yaw) * Math.cos(orbit.pitch) * radius,
+        Math.sin(orbit.pitch) * radius,
+        Math.cos(orbit.yaw) * Math.cos(orbit.pitch) * radius,
+      );
+    }
+    if (!camInit || rocketLaunch || earthReentry || farmArrivalCamera) {
+      cameraLocalOffset.copy(cameraLocalGoal);
+    } else {
+      updateChaseOffset(cameraLocalOffset, cameraLocalGoal, dt);
+    }
+    camPos.copy(cameraLocalOffset).applyQuaternion(camFrameQuat).add(planePos);
   }
   camInit = true;
   camera.position.copy(camPos);
@@ -3810,6 +4058,12 @@ function tickFrame() {
   if (firstPerson) {
     const cosPitch = Math.cos(orbit.pitch);
     camTarget.set(Math.sin(orbit.yaw) * cosPitch * 30, 1.58 - Math.sin(orbit.pitch) * 30, -Math.cos(orbit.yaw) * cosPitch * 30).applyQuaternion(camFrameQuat).add(planePos);
+  } else if (rocketLaunch) {
+    camTarget.set(
+      0,
+      0.5 - launchCameraPhase * 0.1,
+      -4.2 + launchCameraPhase * 4.8,
+    ).applyQuaternion(camFrameQuat).add(planePos);
   } else {
     camTarget.set(0, selectedPlane === "parachutist" && plane.state === "grounded" ? 1.1 : 0.5, -cameraProfile[2] * 0.4).applyQuaternion(camFrameQuat).add(planePos);
   }
@@ -3818,10 +4072,11 @@ function tickFrame() {
     const desiredDistance = cameraCollisionDir.length();
     if (desiredDistance > 0.1) {
       cameraCollisionDir.multiplyScalar(1 / desiredDistance);
-      if (frameCount % 3 === 0 || cameraObstacleDistance == null) {
+      if (frameNow - lastCameraProbeAt >= 60 || cameraObstacleDistance == null) {
+        lastCameraProbeAt = frameNow;
         cameraRaycaster.set(camTarget, cameraCollisionDir);
         cameraRaycaster.far = desiredDistance;
-        const obstruction = cameraRaycaster.intersectObject(tiles.group, true)[0];
+        const obstruction = raycastVisibleTerrain(tiles, cameraRaycaster);
         cameraObstacleDistance = obstruction ? Math.max(0.8, obstruction.distance - 0.3) : desiredDistance;
       }
       const safeDistance = Math.min(desiredDistance, cameraObstacleDistance ?? desiredDistance);
@@ -3837,7 +4092,7 @@ function tickFrame() {
   // kopuła nieba i słońce w LOKALNEJ ramce północnej (bez kursu) —
   // globalna oś Y jest przechylona ~38° względem horyzontu na szer. 52°N,
   // co dawało ukośną granicę nieba i błękitną poświatę
-  frameAt(plane.lat, plane.lon, plane.height, 0, 0, 0).decompose(skyFramePos, skyQuat, skyFrameScale);
+  frameAt(plane.lat, plane.lon, plane.height, 0, 0, 0, skyFrameMatrix).decompose(skyFramePos, skyQuat, skyFrameScale);
   sky.mesh.position.copy(camPos);
   sky.mesh.quaternion.copy(skyQuat);
   sky.uniforms.uTime.value = clock.elapsedTime;
@@ -3864,8 +4119,15 @@ function tickFrame() {
     camera.updateProjectionMatrix();
   }
 
-  const surfaceProbeEvery = selectedPlane === "parachutist" && !pendingSnap ? 2 : 8;
-  if ((!menuOpen || awaitingSnap) && frameCount % surfaceProbeEvery === 0) {
+  const estimatedAgl = plane.height - groundAlt;
+  const surfaceProbeInterval = pendingSnap || awaitingSnap
+    ? 100
+    : selectedPlane === "parachutist"
+      ? plane.state === "grounded" ? 50 : 65
+      : estimatedAgl < 500 ? 80 : plane.speed >= 120 ? 600 : 240;
+  let groundCollisionConfirmed = false;
+  if ((!menuOpen || awaitingSnap) && frameNow - lastSurfaceProbeAt >= surfaceProbeInterval) {
+    lastSurfaceProbeAt = frameNow;
     const refH = pendingSnap || awaitingSnap ? Math.max(plane.height, spawnHoldAlt()) : plane.height;
     const gh = probeGround(plane.lat, plane.lon, refH);
     if (gh !== null) {
@@ -3901,9 +4163,18 @@ function tickFrame() {
         }
       } else if (selectedPlane === "parachutist") {
         plane.setGroundClearance?.(plane.height - gh);
-        if (plane.state === "grounded") plane.settleOnSurface(gh);
-        else if (plane.state !== "grounded" && plane.verticalSpeed <= 0 && plane.height <= gh + 0.65) plane.land(gh);
+        if (plane.state === "grounded") {
+          groundContact.reset();
+          plane.settleOnSurface(gh);
+        } else {
+          const landingContact = plane.verticalSpeed <= 0 && plane.height <= gh + 0.65;
+          if (groundContact.sample(landingContact)) plane.land(gh);
+        }
+      } else {
+        groundCollisionConfirmed = groundContact.sample(plane.height - gh < 4);
       }
+    } else {
+      groundContact.reset();
     }
   }
   if (interstellarArrivalPending && performance.now() - interstellarArrivalStartedAt >= FARM_SNAP_TIMEOUT_MS && snapLastGh === null) {
@@ -3938,8 +4209,17 @@ function tickFrame() {
     ? plane.state === "grounded" ? "street" : agl < 240 ? "landing" : "normal"
     : "normal");
   updateDetailCamera();
-  // bez kolizji podczas dosadzania — pomiar gruntu jeszcze się doprecyzowuje
-  if (selectedPlane !== "parachutist" && !rocketLaunch && !earthReentry && !cooperFarmRocketReady && flying && !pendingSnap && (agl < 4 || (frameCount % 4 === 0 && wingHit()))) {
+  let wingCollisionConfirmed = false;
+  const canHitTerrain = selectedPlane !== "parachutist" && !rocketLaunch && !earthReentry && !cooperFarmRocketReady && flying && !pendingSnap;
+  if (canHitTerrain && agl < 120 && frameNow - lastWingProbeAt >= 80) {
+    lastWingProbeAt = frameNow;
+    wingCollisionConfirmed = wingContact.sample(wingHit());
+  } else if (!canHitTerrain || agl >= 120) {
+    wingContact.reset();
+  }
+  // Visible terrain must report contact twice. This rejects a single bad LOD
+  // sample without weakening a real low-altitude impact.
+  if (canHitTerrain && (groundCollisionConfirmed || wingCollisionConfirmed)) {
     crash();
   }
 
@@ -4019,10 +4299,7 @@ function tickFrame() {
       ? ` · Vertical launch ${Math.round(plane.height / 1000)} km / 100 km`
       : earthReentry ? ` · Earth reentry ${Math.round(Math.max(0, agl) / 1000)} km` : '';
     flightStatus.textContent = loadError || QUALITY[settings.quality].label + ' · ' + canvas.width + ' × ' + canvas.height + ' · ' + Math.round(1 / Math.max(rawDt,0.001)) + ' FPS' + launchLabel + detailLabel;
-    renderAttributions(credits, tiles.getAttributions([]));
-    if (tiles.visibleTiles.size) {
-      const source = document.createElement('span'); source.textContent = 'Terrain: Google Maps'; credits.prepend(source);
-    }
+    refreshMapCredits();
   }
 
   const mateDbg = [];
@@ -4075,12 +4352,21 @@ function tickFrame() {
     terrainDetailMode,
     terrainLoadProgress: tiles.loadProgress,
     terrainCacheBytes: tiles.lruCache.cachedBytes,
+    terrainCacheLimitBytes: tiles.lruCache.maxBytesSize,
+    memorySafeMode,
     detailCameraRegistered,
     terrainErrorTarget: tiles.errorTarget,
+    terrainMaxTilesProcessed: tiles.maxTilesProcessed,
+    terrainParseJobs: tiles.parseQueue.maxJobs,
+    terrainFastFlight: !!terrainStreamingProfile?.fastFlight,
+    mapCreditsRenderCount,
     measuredFps: adaptiveQuality.lastFps,
     terrainCacheFull: tiles.lruCache.isFull(),
     rocketLaunch: !!rocketLaunch,
     rocketLaunchVelocity: rocketLaunch?.velocity ?? 0,
+    rocketLaunchCameraPhase: launchCameraPhase,
+    rocketLaunchCameraLocal: rocketLaunch ? cameraLocalOffset.toArray() : null,
+    parachutistCameraClimb: ctrl.cameraClimb,
     skySpaceBlend: sky?.uniforms?.uSpaceBlend?.value ?? 0,
     toneMappingExposure: renderer?.toneMappingExposure ?? 0,
     earthReentry: !!earthReentry,
@@ -4129,6 +4415,51 @@ window.__testRocketLaunch = (height = 99980, testVelocity = 1200) => {
   startRocketLaunch();
   if (rocketLaunch && Number.isFinite(testVelocity)) rocketLaunch.velocity = testVelocity;
   return !!rocketLaunch;
+};
+
+window.__testGroundedParachutist = () => {
+  if (!navigator.webdriver) return false;
+  const parachutistIndex = PLANE_ORDER.indexOf("parachutist");
+  selectMode("free");
+  selectPlane(parachutistIndex, 0, true);
+  if (planeMesh?.userData?.key !== "parachutist") loadPlane("parachutist");
+  resetFlight(startLat, startLon);
+  menuOpen = false;
+  paused = false;
+  guessOpen = false;
+  mp.active = false;
+  pendingSnap = false;
+  awaitingSnap = false;
+  crashed = false;
+  finished = false;
+  groundAlt = 0;
+  plane.land(groundAlt);
+  el.menu.classList.add("hidden");
+  el.landing.classList.add("hidden");
+  return plane.state === "grounded";
+};
+
+window.__testFighterFlight = (speed = 150, height = 1400) => {
+  if (!navigator.webdriver) return false;
+  const fighterIndex = PLANE_ORDER.indexOf("jet");
+  selectMode("free");
+  selectPlane(fighterIndex, 0, true);
+  if (planeMesh?.userData?.key !== "jet") loadPlane("jet");
+  resetFlight(startLat, startLon);
+  menuOpen = false;
+  paused = false;
+  guessOpen = false;
+  mp.active = false;
+  pendingSnap = false;
+  awaitingSnap = false;
+  crashed = false;
+  finished = false;
+  groundAlt = 0;
+  plane.height = Number.isFinite(height) ? height : 1400;
+  plane.speed = Number.isFinite(speed) ? speed : 150;
+  el.menu.classList.add("hidden");
+  el.landing.classList.add("hidden");
+  return selectedPlane === "jet";
 };
 
 window.__testSpaceApproach = (name, surfaceDistance = 1, speed = 28, entry = false) => {
@@ -4182,7 +4513,7 @@ function updateHud(agl) {
       ? "ON FOOT · W/S walk · A/D turn · zoom in for first-person · Street View below · Space gentle takeoff · R rocket launch"
       : plane.state === "launching"
         ? `${plane.launchMode === "rocket" ? "ROCKET LAUNCH" : "GENTLE TAKEOFF"} · steer with A/D · S cancels climb and descends`
-        : "CANOPY · A/D steer · S descend + slow · W flatten · zoom in for first-person";
+        : "CANOPY · A/D steer · S descend + slow · hold W for a gentle climb · zoom in for first-person";
   } else if (selectedPlane === "rocket" && !menuOpen) {
     movementStatus.hidden = false;
     movementStatus.textContent = earthReentry

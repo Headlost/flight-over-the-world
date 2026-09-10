@@ -159,6 +159,7 @@ export class PlaneController {
     this.boost = spec.boost ?? 85;
     this.brake = spec.brake ?? 30;
     this.steering = Math.max(0.5, Math.min(1.5, spec.steering ?? 1));
+    this.turnRate = Math.max(0.5, Math.min(5, spec.turnRate ?? 1));
     this.speed = this.cruise; // m/s
     const span = Math.max(1, this.boost - this.brake);
     this.cruiseT = Math.max(0, Math.min(1, (this.cruise - this.brake) / span));
@@ -184,8 +185,12 @@ export class PlaneController {
     this.speed += (targetSpeed - drag - this.speed) * (1 - Math.exp(-2.2 * dt));
     this.speed = Math.max(1, this.speed);
 
-    // zakręt przez przechylenie
-    this.heading += -9.81 * Math.tan(this.roll) / Math.max(15, this.speed) * dt;
+    // Bank remains physically meaningful at normal speed, while a modest
+    // high-speed floor keeps jets and the atmospheric rocket responsive enough
+    // to complete a turn instead of feeling as if they hit an invisible wall.
+    const physicalTurn = 9.81 * Math.abs(Math.tan(this.roll)) / Math.max(15, this.speed);
+    const highSpeedTurn = Math.abs(Math.sin(this.roll)) * 0.12 * this.steering;
+    this.heading += -Math.sign(this.roll) * Math.max(physicalTurn, highSpeedTurn) * this.turnRate * dt;
 
     // przeciągnięcie przy małej prędkości
     const stallSpeed = (this.brake + 4) / Math.sqrt(Math.max(0.2, Math.cos(this.roll)));

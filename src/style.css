@@ -51,6 +51,11 @@ input[style*="display: none"] + .pick-location, input.locked + .pick-location { 
 #space-targets kbd { padding: 1px 4px; border-color: #bdefff55; background: #07111f; }
 #space-enter { display: block; width: auto; margin: 9px auto 0; padding: 7px 13px; border: 1px solid #7eeaff88; border-radius: 999px; background: #113e5d; color: white; font: 700 11px/1.2 system-ui; }
 #space-enter:disabled { border-color: #8391a333; background: #152033; color: #7d8b9c; cursor: default; }
+#space-action-hint { position: fixed; z-index: 8; left: 50%; bottom: 174px; display: flex; align-items: center; gap: 7px; max-width: calc(100vw - 24px); transform: translateX(-50%); padding: 5px 10px 5px 6px; border: 1px solid #6dffa768; border-radius: 999px; background: #06130de8; color: #dfffea; box-shadow: 0 5px 20px #0009, 0 0 14px #43f58b16; font: 600 11px/1.25 system-ui; letter-spacing: .015em; white-space: nowrap; pointer-events: none; }
+#space-action-hint[hidden] { display: none; }
+#space-action-hint kbd { display: grid; width: 29px; height: 29px; place-items: center; flex: 0 0 auto; border: 1px solid #7cffae; border-radius: 8px; background: #123d27; color: #afffca; box-shadow: 0 0 0 1px #b5ffcf18 inset, 0 0 13px #42ff8b58; font: 800 14px/1 system-ui; animation: space-action-pulse 1.35s ease-in-out infinite; }
+@keyframes space-action-pulse { 50% { transform: scale(1.08); background: #185535; color: #eafff0; box-shadow: 0 0 0 1px #d3ffe12c inset, 0 0 19px #42ff8b85; } }
+@media (prefers-reduced-motion: reduce) { #space-action-hint kbd { animation: none; } }
 #planet-entry { --entry-color: #7bdcff; position: fixed; z-index: 8; inset: 0; display: grid; place-content: center; gap: 8px; opacity: 0; overflow: hidden; color: #fff; text-align: center; pointer-events: none; transition: opacity .42s ease; }
 #planet-entry.show { opacity: 1; }
 #planet-entry::before { content: ""; position: absolute; inset: -35%; background: repeating-conic-gradient(from 0deg at 50% 50%, transparent 0 4.6deg, color-mix(in srgb, var(--entry-color) 40%, transparent) 4.8deg 5deg, transparent 5.2deg 10deg); mask-image: radial-gradient(circle, transparent 0 11%, #000 24% 76%, transparent 94%); animation: entry-streaks .85s linear infinite; }
@@ -89,24 +94,11 @@ body.black-hole-accretion #game-canvas { filter: contrast(1.1) saturate(1.18); }
 .event-horizon-void::before { content: ""; position: absolute; inset: -60%; opacity: .24; background: repeating-conic-gradient(from 12deg, transparent 0 5.8deg, #dce8ff 5.86deg 5.9deg, transparent 5.96deg 13deg); mask-image: radial-gradient(circle, transparent 0 2%, #000 4%, transparent 42%); animation: void-fall 8s cubic-bezier(.5,0,.9,.45) infinite; }
 .event-horizon-void::after { content: ""; position: absolute; inset: 0; background: radial-gradient(circle at center, #000 0 42%, #07080a 62%, #000 86%); animation: void-breathe 5s ease-in-out infinite alternate; }
 #interstellar.tesseract-phase .event-horizon-void { opacity: 0; }
-.tesseract { position: absolute; z-index: 1; inset: 0; opacity: 0; overflow: hidden; background: #010303; transition: opacity .45s ease; }
+.tesseract { position: absolute; z-index: 1; inset: 0; display: grid; place-items: center; opacity: 0; overflow: hidden; background: #000; transition: opacity .45s ease; }
 #interstellar.show .tesseract { opacity: 1; }
-.tesseract::after { content: ""; position: absolute; inset: 0; background: linear-gradient(90deg, #58e7ee0a, transparent 16% 84%, #ffc46b0b), radial-gradient(circle, transparent 0 46%, #0008 92%); mix-blend-mode: screen; pointer-events: none; }
-#tesseract-canvas { display: block; width: 100%; height: 100%; pointer-events: none; touch-action: none; cursor: grab; }
-#interstellar.tesseract-phase #tesseract-canvas { pointer-events: auto; }
-#interstellar.tesseract-phase #tesseract-canvas:active { cursor: grabbing; }
-.tesseract-reticle { position: absolute; left: 50%; top: 50%; width: min(31vw, 430px); aspect-ratio: 1; translate: -50% -50%; opacity: 0; transition: opacity .5s ease; animation: reticle-breathe 2.6s ease-in-out infinite alternate; pointer-events: none; }
-#interstellar.tesseract-phase .tesseract-reticle { opacity: .38; }
-.tesseract-reticle i { position: absolute; width: 23px; height: 23px; border-color: #85eaf0; filter: drop-shadow(0 0 7px #5cdae8); }
-.tesseract-reticle i:nth-child(1) { left: 0; top: 0; border-left: 1px solid; border-top: 1px solid; }
-.tesseract-reticle i:nth-child(2) { right: 0; top: 0; border-right: 1px solid; border-top: 1px solid; }
-.tesseract-reticle i:nth-child(3) { right: 0; bottom: 0; border-right: 1px solid; border-bottom: 1px solid; }
-.tesseract-reticle i:nth-child(4) { left: 0; bottom: 0; border-left: 1px solid; border-bottom: 1px solid; }
-.tesseract-readout { position: absolute; z-index: 2; left: clamp(15px, 3vw, 48px); top: clamp(15px, 4vh, 44px); display: grid; gap: 5px; padding-left: 12px; border-left: 1px solid #69e5ed91; opacity: 0; color: #9eeaf0; font: 600 clamp(7px, .72vw, 10px)/1.2 ui-monospace, monospace; letter-spacing: .27em; text-shadow: 0 0 9px #59dce8; transition: opacity .5s ease; }
-#interstellar.tesseract-phase .tesseract-readout { opacity: 1; }
-.tesseract-readout strong { color: #f3c984; font-size: clamp(10px, 1vw, 14px); font-weight: 400; letter-spacing: .18em; }
-.tesseract-look-hint { position: absolute; z-index: 2; left: 50%; bottom: 14%; translate: -50% 0; padding: 7px 10px; border-left: 1px solid #69e5ed91; opacity: 0; color: #a8e6ea; font: 600 9px/1.3 ui-monospace, monospace; letter-spacing: .19em; white-space: nowrap; transition: opacity .6s ease 1s; pointer-events: none; }
-#interstellar.tesseract-phase .tesseract-look-hint { opacity: .72; }
+#tesseract-video { position: absolute; inset: 0; display: block; width: 100vw; height: 100vh; object-fit: cover; object-position: 50% 50%; opacity: 0; transform: scale(.002); transform-origin: 50% 50%; filter: brightness(.12) blur(7px); background: #000; pointer-events: none; will-change: transform, opacity, filter; }
+#interstellar.approach-phase #tesseract-video { animation: tesseract-video-approach var(--tesseract-approach-duration, 5s) cubic-bezier(.2,.68,.18,1) both; }
+#interstellar.tesseract-phase #tesseract-video { opacity: 1; transform: scale(1); filter: none; }
 .interstellar-sub { position: absolute; z-index: 2; bottom: 9%; padding: 8px 12px; border-radius: 999px; background: #0009; font: 700 11px/1.4 system-ui; letter-spacing: .16em; text-transform: uppercase; color: #d7e0ed; }
 .transit-countdown { position: absolute; z-index: 3; display: grid; gap: 6px; place-items: center; padding: 18px 22px; opacity: .82; color: #b9c4d2; text-align: center; transition: opacity .8s ease, scale .8s ease; pointer-events: none; }
 .transit-countdown span { font: 700 9px/1.3 system-ui; letter-spacing: .28em; }
@@ -114,7 +106,7 @@ body.black-hole-accretion #game-canvas { filter: contrast(1.1) saturate(1.18); }
 #interstellar.tesseract-phase .transit-countdown { opacity: 0; scale: 1.7; }
 @keyframes void-fall { 0% { scale: .45; rotate: 0deg; opacity: 0; } 30% { opacity: .28; } 100% { scale: 1.6; rotate: 22deg; opacity: 0; } }
 @keyframes void-breathe { to { scale: 1.08; filter: blur(4px); } }
-@keyframes reticle-breathe { to { opacity: .72; scale: 1.04; } }
+@keyframes tesseract-video-approach { 0% { opacity: .14; transform: scale(.002); filter: brightness(.12) blur(7px); } 22% { opacity: .45; } 100% { opacity: 1; transform: scale(1); filter: none; } }
 @keyframes countdown-panic { 50% { opacity: .48; scale: .96; } }
 #location-arrival { position: fixed; z-index: 12; left: 50%; top: 16%; display: flex; flex-direction: column; align-items: center; gap: 8px; min-width: min(560px, calc(100vw - 32px)); padding: 17px 22px; border: 1px solid #e3bd7d66; border-radius: 10px; opacity: 0; transform: translate(-50%, -18px); background: linear-gradient(150deg, #090704f2, #25180ddf); color: #f3e7d2; text-align: center; pointer-events: none; box-shadow: 0 18px 58px #000b, inset 0 0 34px #d8993421; transition: opacity .6s ease, transform .6s ease; }
 #location-arrival.show { opacity: 1; transform: translate(-50%, 0); pointer-events: auto; }
@@ -1210,22 +1202,17 @@ kbd {
   display: none;
   position: fixed;
   inset: 0;
-  z-index: 3;
+  z-index: 8;
   pointer-events: none;
 }
 
 #touch-pause {
   pointer-events: auto;
-  position: absolute;
-  top: max(12px, env(safe-area-inset-top));
-  right: 12px;
-  padding: 10px 14px;
   background: rgba(18, 14, 10, 0.72);
   border: 1px solid rgba(243, 234, 214, 0.22);
   border-radius: 8px;
   color: var(--paper);
   font-family: inherit;
-  font-size: 14px;
   font-weight: 700;
 }
 
@@ -1233,7 +1220,7 @@ kbd {
   pointer-events: auto;
   position: absolute;
   left: max(16px, env(safe-area-inset-left));
-  bottom: max(20px, env(safe-area-inset-bottom));
+  bottom: max(34px, calc(env(safe-area-inset-bottom) + 14px));
   width: 132px;
   height: 132px;
   border-radius: 50%;
@@ -1255,28 +1242,51 @@ kbd {
   pointer-events: none;
 }
 
+.stick-key {
+  position: absolute;
+  color: rgba(243, 234, 214, 0.68);
+  font: 800 11px/1 system-ui, sans-serif;
+  pointer-events: none;
+  user-select: none;
+}
+
+.stick-key-up { top: 9px; left: 50%; transform: translateX(-50%); }
+.stick-key-down { bottom: 9px; left: 50%; transform: translateX(-50%); }
+.stick-key-left { left: 11px; top: 50%; transform: translateY(-50%); }
+.stick-key-right { right: 11px; top: 50%; transform: translateY(-50%); }
+
 .touch-btns {
   pointer-events: auto;
   position: absolute;
   right: max(12px, env(safe-area-inset-right));
-  bottom: max(20px, env(safe-area-inset-bottom));
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
+  bottom: max(34px, calc(env(safe-area-inset-bottom) + 14px));
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+  width: min(210px, calc(100vw - 172px));
 }
 
 .touch-btns button {
-  min-width: 92px;
-  padding: 16px 18px;
+  min-width: 0;
+  min-height: 50px;
+  padding: 11px 9px;
   background: rgba(18, 14, 10, 0.72);
   border: 1px solid rgba(243, 234, 214, 0.22);
   border-radius: 10px;
   color: var(--paper);
   font-family: inherit;
-  font-size: 15px;
+  font-size: 13px;
   font-weight: 700;
   touch-action: none;
   user-select: none;
+}
+
+#touch-action,
+#touch-special,
+#touch-enter {
+  grid-column: 1 / -1;
+  border-color: rgba(216, 162, 74, 0.62);
+  background: rgba(92, 57, 20, 0.82);
 }
 
 .touch-btns button.held,
@@ -1286,15 +1296,77 @@ kbd {
   border-color: var(--gold);
 }
 
-#touch-talk { display: none; }
-#touch-action { display: none; }
-body.parachutist-selected #touch-action, body.rocket-selected #touch-action { display: block; }
-#touch.talk #touch-talk { display: block; }
+#touch-action.space-context-ready,
+#touch-enter.space-context-ready {
+  border-color: #7cffae;
+  background: #123d27e8;
+  color: #eafff0;
+  box-shadow: 0 0 16px #42ff8b52;
+  animation: space-touch-action-pulse 1.35s ease-in-out infinite;
+}
+
+@keyframes space-touch-action-pulse {
+  50% { filter: brightness(1.22); box-shadow: 0 0 23px #42ff8b78; }
+}
+
+.touch-btns button[hidden] { display: none; }
+
+#rotate-hint {
+  position: fixed;
+  inset: 0;
+  z-index: 30;
+  display: none;
+  place-items: center;
+  padding: max(22px, env(safe-area-inset-top)) max(22px, env(safe-area-inset-right)) max(22px, env(safe-area-inset-bottom)) max(22px, env(safe-area-inset-left));
+  background: rgba(5, 9, 8, 0.78);
+  backdrop-filter: blur(7px);
+}
+
+#rotate-hint.show { display: grid; }
+
+.rotate-card {
+  display: grid;
+  justify-items: center;
+  gap: 11px;
+  width: min(340px, 100%);
+  padding: 24px 22px 20px;
+  border: 1px solid rgba(216, 162, 74, 0.72);
+  border-radius: 16px;
+  background: rgba(18, 14, 10, 0.96);
+  box-shadow: 0 20px 70px rgba(0, 0, 0, 0.62);
+  color: var(--paper);
+  text-align: center;
+}
+
+.rotate-phone {
+  display: grid;
+  place-items: center;
+  width: 68px;
+  height: 42px;
+  border: 3px solid var(--gold);
+  border-radius: 9px;
+  color: var(--gold);
+  font: 800 25px/1 system-ui, sans-serif;
+}
+
+.rotate-card strong { font-size: 22px; }
+.rotate-card span { color: var(--muted); font: 14px/1.45 system-ui, sans-serif; }
+.rotate-card button {
+  width: 100%;
+  margin-top: 4px;
+  padding: 12px 14px;
+  border: 1px solid rgba(243, 234, 214, 0.28);
+  border-radius: 9px;
+  background: rgba(243, 234, 214, 0.08);
+  color: var(--paper);
+  font: 700 14px/1.2 system-ui, sans-serif;
+}
 
 @media (hover: none), (pointer: coarse), (max-width: 720px) {
   .hint-desk { display: none; }
   .hint-touch { display: block; }
   #touch.show { display: block; }
+  #space-action-hint { display: none; }
 
   #f-instruments {
     left: 10px;
@@ -1325,6 +1397,50 @@ body.parachutist-selected #touch-action, body.rocket-selected #touch-action { di
   #space-targets button { flex: 0 0 auto; }
 
   .f-box span:last-child { font-size: 16px; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  #touch-action.space-context-ready,
+  #touch-enter.space-context-ready { animation: none; }
+}
+
+@media (orientation: landscape) and (hover: none),
+       (orientation: landscape) and (pointer: coarse) {
+  #rotate-hint { display: none !important; }
+
+  #stick {
+    left: max(18px, env(safe-area-inset-left));
+    bottom: max(30px, calc(env(safe-area-inset-bottom) + 16px));
+    width: clamp(112px, 32vh, 140px);
+    height: clamp(112px, 32vh, 140px);
+  }
+
+  .touch-btns {
+    right: max(16px, env(safe-area-inset-right));
+    bottom: max(30px, calc(env(safe-area-inset-bottom) + 16px));
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    width: min(390px, 48vw);
+    gap: 7px;
+  }
+
+  .touch-btns button {
+    min-height: 44px;
+    padding: 8px 7px;
+    font-size: 12px;
+  }
+
+  #touch-action,
+  #touch-special,
+  #touch-enter { grid-column: auto; }
+
+  body.space-mode #space-nav {
+    left: max(8px, env(safe-area-inset-left));
+    right: max(102px, calc(env(safe-area-inset-right) + 94px));
+    width: auto;
+    transform: none;
+  }
+
+  #street-view-link { left: 35%; }
 }
 
 @media (max-width: 720px), (max-height: 820px) {

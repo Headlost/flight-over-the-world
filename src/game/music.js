@@ -1,7 +1,7 @@
 const BACKGROUND_GAIN = 0.22;
 const BLACK_HOLE_GAIN = 0.48;
 const BLACK_HOLE_ENTRY_MIX = 0.25;
-const BLACK_HOLE_CUE_SECONDS = 30;
+const BLACK_HOLE_CUE_SECONDS = 45;
 
 const background = document.getElementById("bgm");
 const blackHoleScore = document.getElementById("black-hole-score");

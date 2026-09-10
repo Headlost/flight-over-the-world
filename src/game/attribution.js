@@ -1,4 +1,11 @@
 // Provider HTML is untrusted. Preserve text and HTTPS links without executing markup.
+export function attributionSignature(entries = []) {
+  return entries
+    .map((entry) => `${String(entry?.type || '')}:${String(entry?.value || '')}`)
+    .sort()
+    .join('\u001f');
+}
+
 export function renderAttributions(container, entries) {
   container.replaceChildren();
   function append(parent, node) {

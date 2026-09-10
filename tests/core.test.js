@@ -1,14 +1,16 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { PlaneController } from '../src/game/plane.js';
-import { createParachutistModel, ParachutistController, updateParachutistModel } from '../src/game/paraglider.js';
+import { createParachutistModel, parachutistDescentScale, ParachutistController, updateParachutistModel } from '../src/game/paraglider.js';
 import { parseCoordinates, geocodeCity } from '../src/game/location.js';
 import { validMessage, escapeHtml } from '../src/game/protocol.js';
 import { renderRatio, AdaptiveQuality, terrainStreamProfile } from '../src/game/quality.js';
+import { attributionSignature } from '../src/game/attribution.js';
 import { disposeModel } from '../src/game/dispose.js';
 import { streetViewUrl } from '../src/game/streetview.js';
 import { SpaceFlightController } from '../src/game/space.js';
-import { Box3, Group, Mesh, BoxGeometry, MeshBasicMaterial, Texture, Vector3 } from 'three';
+import { ContactConfirmation, parachutistCameraClimbAssist, raycastVisibleTerrain, rocketLaunchCameraPhase, updateChaseOffset } from '../src/game/flightSafety.js';
+import { Box3, Group, Mesh, BoxGeometry, MeshBasicMaterial, Quaternion, Raycaster, Texture, Vector3 } from 'three';
 
 test('coordinates bypass network and geographic bounds are validated', async () => {
   assert.deepEqual(await geocodeCity(' -33.86, 151.21 '), {lat:-33.86,lon:151.21});
@@ -47,6 +49,38 @@ test('ground streaming prioritizes the visible view when frame rate is low', () 
   assert.ok(stressed.maxTilesProcessed < smooth.maxTilesProcessed);
   assert.equal(terrainStreamProfile('street', 60, false, true).prefetch, false);
   assert.ok(terrainStreamProfile('street', 60, true).cacheBytes <= 300e6);
+});
+
+test('fast flight spreads terrain work without reducing the detail target', () => {
+  const regular = terrainStreamProfile('normal', 60, false, false, false, false);
+  const fast = terrainStreamProfile('normal', 60, false, false, false, true);
+  assert.equal(fast.error, regular.error);
+  assert.equal(fast.errorFalloff, regular.errorFalloff);
+  assert.equal(fast.cacheTiles, regular.cacheTiles);
+  assert.equal(fast.cacheBytes, regular.cacheBytes);
+  assert.equal(fast.gpuBytes, regular.gpuBytes);
+  assert.ok(fast.maxTilesProcessed < regular.maxTilesProcessed);
+  assert.equal(fast.maxConcurrentParses, 2);
+});
+
+test('map attribution signature is stable until attribution content changes', () => {
+  const a = [{type:'string', value:'Google'}, {type:'html', value:'<a href="https://example.com">Provider</a>'}];
+  const reordered = [a[1], a[0]];
+  assert.equal(attributionSignature(a), attributionSignature(reordered));
+  assert.notEqual(attributionSignature(a), attributionSignature([{type:'string', value:'Another provider'}]));
+});
+
+test('mobile memory recovery preserves visible detail while limiting load spikes', () => {
+  for (const mode of ['normal', 'landing', 'street']) {
+    const regular = terrainStreamProfile(mode, 60, true, false, false);
+    const recovery = terrainStreamProfile(mode, 60, true, false, true);
+    assert.equal(recovery.error, regular.error);
+    assert.equal(recovery.errorFalloff, regular.errorFalloff);
+    assert.equal(recovery.prefetch, false);
+    assert.ok(recovery.cacheBytes < regular.cacheBytes);
+    assert.ok(recovery.gpuBytes < regular.gpuBytes);
+    assert.ok(recovery.maxTilesProcessed < regular.maxTilesProcessed);
+  }
 });
 const pose = {t:'pose',lat:52,lon:16,h:400,heading:0,pitch:0,roll:0,seq:2,at:1200,plane:'pa28'};
 test('multiplayer rejects forged host commands, malformed poses and unsafe object keys', () => {
@@ -107,9 +141,49 @@ test('rocket steering profile turns more tightly over Earth', () => {
   assert.ok(rocketTurn > regularTurn * 1.18);
 });
 
+test('fighter doubles its already enhanced turn without exaggerating the visible bank', () => {
+  const regular = new PlaneController(52, 16, 1000, 0, {cruise:150,boost:420,brake:80,turnRate:2});
+  const fighter = new PlaneController(52, 16, 1000, 0, {cruise:150,boost:420,brake:80,turnRate:4});
+  let regularTurn = 0;
+  let fighterTurn = 0;
+  let regularHeading = regular.heading;
+  let fighterHeading = fighter.heading;
+  for (let i = 0; i < 120; i++) {
+    regular.update(1 / 60, {roll:0.7,pitch:0,throttle:0});
+    fighter.update(1 / 60, {roll:0.7,pitch:0,throttle:0});
+    regularTurn += Math.atan2(Math.sin(regular.heading - regularHeading), Math.cos(regular.heading - regularHeading));
+    fighterTurn += Math.atan2(Math.sin(fighter.heading - fighterHeading), Math.cos(fighter.heading - fighterHeading));
+    regularHeading = regular.heading;
+    fighterHeading = fighter.heading;
+  }
+  assert.ok(Math.abs(fighter.roll - regular.roll) < 1e-12);
+  assert.ok(Math.abs(fighterTurn / regularTurn - 2) < 1e-6);
+});
+
+test('high-speed aircraft can reverse smoothly without a heading rebound', () => {
+  for (const spec of [
+    {cruise:75,boost:185,brake:45},
+    {cruise:92,boost:250,brake:55},
+    {cruise:150,boost:420,brake:80},
+    {cruise:220,boost:600,brake:120,steering:1.2},
+  ]) {
+    const craft = new PlaneController(52, 16, 1000, 0, spec);
+    let previous = craft.heading;
+    let turn = 0;
+    for (let i = 0; i < 60 * 40; i++) {
+      craft.update(1 / 60, {roll:1,pitch:0,throttle:1});
+      const delta = Math.atan2(Math.sin(craft.heading - previous), Math.cos(craft.heading - previous));
+      assert.ok(delta >= 0);
+      turn += delta;
+      previous = craft.heading;
+    }
+    assert.ok(turn > Math.PI, `expected a U-turn, got ${turn} radians`);
+  }
+});
+
 test('parachutist lands safely, walks at a constant brisk pace and relaunches gently', () => {
   const pilot = new ParachutistController(52, 16, 120, 0);
-  for (let i = 0; i < 60; i++) pilot.update(1 / 60, {roll:0.5,pitch:-1,throttle:0});
+  for (let i = 0; i < 60; i++) pilot.update(1 / 60, {roll:0.5,pitch:0,throttle:0});
   assert.equal(pilot.state, 'airborne');
   assert.ok(pilot.height < 120);
   assert.ok(pilot.heading > 0);
@@ -141,9 +215,13 @@ test('R-style rocket launch climbs high while S can cancel a gentle takeoff', ()
   const rocket = new ParachutistController(52, 16, 100, 0);
   rocket.land(100);
   assert.equal(rocket.takeOff(100, 'rocket'), true);
-  for (let i = 0; i < 1200; i++) rocket.update(1 / 60, {roll:0,pitch:0,throttle:0});
+  let peakHeight = rocket.height;
+  for (let i = 0; i < 1200; i++) {
+    rocket.update(1 / 60, {roll:0,pitch:0,throttle:0});
+    peakHeight = Math.max(peakHeight, rocket.height);
+  }
   assert.equal(rocket.state, 'airborne');
-  assert.ok(rocket.height > 170);
+  assert.ok(peakHeight > 179);
 });
 
 test('parachutist leaves a roof as flight instead of crashing', () => {
@@ -176,6 +254,112 @@ test('S makes the parachutist descend faster while reducing horizontal speed', (
   const before = descending.verticalSpeed;
   for (let i = 0; i < 60; i++) descending.update(1 / 60, {roll:0,pitch:1,throttle:0});
   assert.ok(descending.verticalSpeed > before);
+});
+
+test('parachutist descends 50% faster high up and keeps the original low-altitude rate', () => {
+  assert.equal(parachutistDescentScale(60), 1);
+  assert.equal(parachutistDescentScale(90), 1.25);
+  assert.equal(parachutistDescentScale(120), 1.5);
+
+  const high = new ParachutistController(52, 16, 1000, 0);
+  const low = new ParachutistController(52, 16, 1000, 0);
+  high.setGroundClearance(400);
+  low.setGroundClearance(50);
+  for (let i = 0; i < 600; i++) {
+    high.update(1 / 60, {roll:0,pitch:1,throttle:0});
+    low.update(1 / 60, {roll:0,pitch:1,throttle:0});
+  }
+  assert.ok(Math.abs(high.verticalSpeed) > Math.abs(low.verticalSpeed) * 1.49);
+  assert.ok(Math.abs(high.verticalSpeed) < Math.abs(low.verticalSpeed) * 1.51);
+});
+
+test('parachutist reaches a brisk descent quickly and climbs only while W is held', () => {
+  const descending = new ParachutistController(52, 16, 100, 0);
+  for (let i = 0; i < 60; i++) descending.update(1 / 60, {roll:0,pitch:1,throttle:0});
+  assert.ok(descending.verticalSpeed < -3.1);
+
+  const climbing = new ParachutistController(52, 16, 100, 0);
+  climbing.land(100);
+  assert.equal(climbing.takeOff(100, 'gentle'), true);
+  for (let i = 0; i < 60 * 8; i++) climbing.update(1 / 60, {roll:0,pitch:-1,throttle:0});
+  assert.equal(climbing.state, 'airborne');
+  assert.ok(climbing.height > 115);
+  assert.ok(climbing.verticalSpeed > 1.6);
+  for (let i = 0; i < 180; i++) climbing.update(1 / 60, {roll:0,pitch:0,throttle:0});
+  assert.ok(climbing.verticalSpeed < -1.1);
+});
+
+test('right-dragging the camera upward provides a sustained parachutist climb assist', () => {
+  assert.equal(parachutistCameraClimbAssist(-0.41, true), 1);
+  assert.equal(parachutistCameraClimbAssist(0.14, true), 0);
+  assert.equal(parachutistCameraClimbAssist(-0.41, false), 0);
+
+  const assisted = new ParachutistController(52, 16, 100, 0);
+  const neutral = new ParachutistController(52, 16, 100, 0);
+  for (const pilot of [assisted, neutral]) {
+    pilot.land(100);
+    assert.equal(pilot.takeOff(100, 'gentle'), true);
+  }
+  for (let i = 0; i < 60 * 10; i++) {
+    assisted.update(1 / 60, {roll:0,pitch:0,throttle:0,cameraClimb:1});
+    neutral.update(1 / 60, {roll:0,pitch:0,throttle:0,cameraClimb:0});
+  }
+  assert.ok(assisted.height > neutral.height + 12);
+  assert.ok(assisted.verticalSpeed > 2.6);
+});
+
+test('terrain contact needs confirmation and raycasts ignore undrawn geometry', () => {
+  const confirmation = new ContactConfirmation(2);
+  assert.equal(confirmation.sample(true), false);
+  assert.equal(confirmation.sample(false), false);
+  assert.equal(confirmation.sample(true), false);
+  assert.equal(confirmation.sample(true), true);
+
+  const tiles = {group:new Group()};
+  const renderedScene = new Group();
+  const hiddenMesh = new Mesh(new BoxGeometry(2, 2, 2), new MeshBasicMaterial());
+  hiddenMesh.position.z = -3;
+  hiddenMesh.visible = false;
+  const renderedMesh = new Mesh(new BoxGeometry(2, 2, 2), new MeshBasicMaterial());
+  renderedMesh.position.z = -10;
+  renderedScene.add(hiddenMesh, renderedMesh);
+  tiles.group.add(renderedScene);
+
+  const detachedActiveScene = new Group();
+  const detachedMesh = new Mesh(new BoxGeometry(2, 2, 2), new MeshBasicMaterial());
+  detachedMesh.position.z = -5;
+  detachedActiveScene.add(detachedMesh);
+  detachedActiveScene.parent = tiles.group;
+  tiles.group.updateMatrixWorld(true);
+  detachedActiveScene.updateMatrixWorld(true);
+
+  const raycaster = new Raycaster(new Vector3(), new Vector3(0, 0, -1), 0, 100);
+  const hit = raycastVisibleTerrain(tiles, raycaster);
+  assert.equal(hit?.object, renderedMesh);
+});
+
+test('chase camera stays locked to a long vehicle turn and caps hitch recovery', () => {
+  const localOffset = new Vector3(0, 4, 12);
+  const localGoal = localOffset.clone();
+  const vehiclePosition = new Vector3(250, -3, 80);
+  const rotation = new Quaternion().setFromAxisAngle(new Vector3(0, 1, 0), Math.PI * 1.7);
+
+  updateChaseOffset(localOffset, localGoal, 0.5);
+  const worldPosition = localOffset.clone().applyQuaternion(rotation).add(vehiclePosition);
+  const recoveredLocal = worldPosition.clone().sub(vehiclePosition).applyQuaternion(rotation.clone().invert());
+  assert.ok(recoveredLocal.distanceTo(localGoal) < 1e-9);
+
+  const hitchOffset = new Vector3();
+  updateChaseOffset(hitchOffset, new Vector3(100, 0, 0), 0.5);
+  assert.ok(hitchOffset.x > 30 && hitchOffset.x < 34);
+});
+
+test('rocket camera holds behind for 1.2 seconds then eases to the angled view', () => {
+  assert.equal(rocketLaunchCameraPhase(0), 0);
+  assert.equal(rocketLaunchCameraPhase(1.199), 0);
+  assert.ok(Math.abs(rocketLaunchCameraPhase(2) - 0.5) < 1e-9);
+  assert.equal(rocketLaunchCameraPhase(2.8), 1);
+  assert.equal(rocketLaunchCameraPhase(20), 1);
 });
 
 test('procedural parachutist stays finite and bounded through flight and walking animation', () => {

@@ -107,8 +107,8 @@
           <button id="start-btn" type="button">Start</button>
         </div>
         <p id="menu-error"></p>
-          <p class="hint hint-desk"><kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd> steer · parachutist: <kbd>S</kbd> descend and slow · <kbd>Space</kbd> gentle takeoff · rocket: <kbd>R</kbd> orbit, <kbd>Shift</kbd> hyperdrive, <kbd>E</kbd> descend · <kbd>Esc</kbd> pause<br>Right-drag to look around · scroll fully in for first-person · space targets: <kbd>1–9</kbd> planets, <kbd>0</kbd> Galactic Core · <kbd>C</kbd> reset camera</p>
-          <p class="hint hint-touch">Drag the stick to steer · use Gentle takeoff after landing</p>
+          <p class="hint hint-desk"><kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd> steer · parachutist: <kbd>S</kbd> descend and slow, hold <kbd>W</kbd> to climb gently · <kbd>Space</kbd> gentle takeoff · rocket: <kbd>R</kbd> orbit, <kbd>Shift</kbd> hyperdrive, <kbd>E</kbd> descend · <kbd>Esc</kbd> pause<br>Right-drag to look around · scroll fully in for first-person · space targets: <kbd>1–9</kbd> planets, <kbd>0</kbd> Galactic Core · <kbd>C</kbd> reset camera</p>
+          <p class="hint hint-touch">For the best controls, rotate your phone sideways · drag the stick to steer</p>
       </div>
     </div>
 
@@ -169,15 +169,31 @@
     </div>
 
     <div id="touch" class="hidden">
-      <button id="touch-pause" type="button">Pause</button>
-      <div id="stick">
+      <div id="stick" aria-label="Flight direction control">
+        <span class="stick-key stick-key-up">W</span>
+        <span class="stick-key stick-key-left">A</span>
+        <span class="stick-key stick-key-right">D</span>
+        <span class="stick-key stick-key-down">S</span>
         <div id="stick-knob"></div>
       </div>
       <div class="touch-btns">
         <button id="touch-boost" type="button">Faster</button>
         <button id="touch-brake" type="button">Slower</button>
-        <button id="touch-action" type="button">Gentle takeoff</button>
-        <button id="touch-talk" type="button">Talk</button>
+        <button id="touch-camera" type="button">Center view</button>
+        <button id="touch-pause" type="button">Pause</button>
+        <button id="touch-action" type="button" hidden>Gentle takeoff</button>
+        <button id="touch-special" type="button" hidden>High takeoff</button>
+        <button id="touch-enter" type="button" hidden>Descend</button>
+        <button id="touch-talk" type="button" hidden>Talk</button>
+      </div>
+    </div>
+
+    <div id="rotate-hint" aria-live="polite" aria-label="Landscape controls recommendation">
+      <div class="rotate-card">
+        <div class="rotate-phone" aria-hidden="true">↻</div>
+        <strong>Rotate your phone</strong>
+        <span>Landscape view gives you a wider flight view and the complete controls.</span>
+        <button id="rotate-dismiss" type="button">Continue vertically</button>
       </div>
     </div>
 
@@ -202,6 +218,11 @@
       <button id="space-enter" type="button">Establish orbit to descend</button>
     </nav>
 
+    <div id="space-action-hint" role="status" aria-live="polite" hidden>
+      <kbd id="space-action-key">R</kbd>
+      <span id="space-action-copy">Enter orbit</span>
+    </div>
+
     <section id="planet-entry" aria-live="polite" aria-hidden="true">
       <div class="planet-entry-horizon" aria-hidden="true"></div>
       <strong id="planet-entry-title">ATMOSPHERIC ENTRY</strong>
@@ -211,13 +232,9 @@
     <section id="interstellar" aria-live="assertive" aria-hidden="true">
       <div class="event-horizon-void" aria-hidden="true"></div>
       <div class="tesseract" aria-hidden="true">
-        <canvas id="tesseract-canvas"></canvas>
-        <div class="tesseract-reticle"><i></i><i></i><i></i><i></i></div>
-        <div class="tesseract-readout">
-          <span>SPACETIME VECTOR</span>
-          <strong>∞ / ∞ / ∞ / ∞</strong>
-        </div>
-        <div class="tesseract-look-hint">DRAG TO LOOK · 360° STRUCTURE</div>
+        <video id="tesseract-video" muted playsinline preload="metadata" poster="./assets/tesseract-poster.jpg" aria-label="Gravitational Tesseract transit">
+          <source src="./assets/tesseract.mp4" type="video/mp4">
+        </video>
       </div>
       <div id="transit-countdown" class="transit-countdown" aria-hidden="true">
         <span>UNKNOWN STRUCTURE IN</span><strong>15</strong>

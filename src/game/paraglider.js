@@ -19,6 +19,20 @@ const WALK_SPEED = 2.5;
 const GROUND_CLEARANCE = 0.32;
 const GENTLE_LAUNCH_HEIGHT = 12;
 const ROCKET_LAUNCH_HEIGHT = 80;
+const GENTLE_CLIMB_SPEED = 1.7;
+const NORMAL_DESCENT_BELOW = 60;
+const FAST_DESCENT_ABOVE = 120;
+
+export function parachutistDescentScale(groundClearance) {
+  if (!Number.isFinite(groundClearance)) return 1.5;
+  const t = MathUtils.clamp(
+    (groundClearance - NORMAL_DESCENT_BELOW) / (FAST_DESCENT_ABOVE - NORMAL_DESCENT_BELOW),
+    0,
+    1,
+  );
+  const smooth = t * t * (3 - 2 * t);
+  return 1 + smooth * 0.5;
+}
 
 function createCanopy() {
   const group = new Group();
@@ -264,10 +278,11 @@ export class ParachutistController {
       const rocket = this.launchMode === "rocket";
       const descend = Math.max(0, MathUtils.clamp(ctrl.pitch, -1, 1));
       const climb = Math.max(0, -MathUtils.clamp(ctrl.pitch, -1, 1));
+      const cameraClimb = MathUtils.clamp(ctrl.cameraClimb || 0, 0, 1);
       const targetSpeed = rocket ? 8.5 : 6.2;
       // Space gives a low, controllable hop. S can cancel it immediately and
       // hand control back to normal canopy flight for a nearby landing.
-      const targetVertical = rocket ? 7 : 2.25 + climb * 0.9 - descend * 4.2;
+      const targetVertical = rocket ? 7 : 2.25 + climb * 0.9 + cameraClimb * 1.35 - descend * 4.2;
       this.speed += (targetSpeed - this.speed) * (1 - Math.exp(-2.5 * dt));
       this.verticalSpeed += (targetVertical - this.verticalSpeed) * (1 - Math.exp(-(rocket ? 2 : 4) * dt));
       this.height += this.verticalSpeed * dt;
@@ -290,8 +305,10 @@ export class ParachutistController {
 
     const pitchInput = MathUtils.clamp(ctrl.pitch, -1, 1);
     const descend = Math.max(0, pitchInput);
-    // Preserve the original, smoother speed curve. S still brakes while adding
-    // sink, and W returns the glider towards its faster trim response.
+    const climb = Math.max(0, -pitchInput);
+    const cameraClimb = MathUtils.clamp(ctrl.cameraClimb || 0, 0, 1);
+    // Preserve the smooth horizontal speed curve. S brakes while adding sink,
+    // and W uses the faster trim response during a gentle powered climb.
     const speedInput = ctrl.throttle !== 0 ? ctrl.throttle : -pitchInput;
     const targetSpeed = speedInput > 0.05 ? this.cruise + (this.boost - this.cruise) * speedInput
       : speedInput < -0.05 ? this.cruise + (this.cruise - this.brake) * speedInput
@@ -303,9 +320,18 @@ export class ParachutistController {
     this.heading = MathUtils.euclideanModulo(this.heading - Math.tan(this.roll) * 0.58 * dt, Math.PI * 2);
     const fast = Math.max(0, (this.speed - this.cruise) / (this.boost - this.cruise));
     const flare = Math.max(0, (this.cruise - this.speed) / (this.cruise - this.brake));
-    let targetSink = -(1.2 + fast * fast * 2.25 - flare * 0.18 + Math.abs(this.roll) * 0.35 + descend * 1.75);
-    if (this.groundClearance < 6) targetSink = Math.max(targetSink, -0.45 - this.groundClearance * 0.12);
-    this.verticalSpeed += (targetSink - this.verticalSpeed) * (1 - Math.exp(-2.5 * dt));
+    const descentScale = parachutistDescentScale(this.groundClearance);
+    let targetVertical = -(1.2 + fast * fast * 2.25 - flare * 0.18 + Math.abs(this.roll) * 0.35 + descend * 2.25) * descentScale;
+    // W provides a restrained climb for as long as it is held. Releasing it
+    // smoothly restores the natural canopy sink instead of launching upward.
+    const climbCommand = Math.max(climb, cameraClimb);
+    if (climbCommand > 0) {
+      const assistedClimbSpeed = GENTLE_CLIMB_SPEED + cameraClimb * 1.1;
+      targetVertical += (assistedClimbSpeed - targetVertical) * climbCommand;
+    }
+    if (this.groundClearance < 6) targetVertical = Math.max(targetVertical, -0.45 - this.groundClearance * 0.12);
+    const verticalResponse = descend > 0 ? 3.3 : climbCommand > 0 ? 2.8 : 2.5;
+    this.verticalSpeed += (targetVertical - this.verticalSpeed) * (1 - Math.exp(-verticalResponse * dt));
     this.height += this.verticalSpeed * dt;
     this.pitch += (Math.atan2(this.verticalSpeed, this.speed) - this.pitch) * (1 - Math.exp(-3 * dt));
     advance(this, this.speed * dt);
