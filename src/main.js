@@ -611,9 +611,6 @@ const el = {
   musicLobbyToggle: document.getElementById("music-lobby-toggle"),
   musicGameToggle: document.getElementById("music-game-toggle"),
   landscapeToggle: document.getElementById("landscape-toggle"),
-  rotateHint: document.getElementById("rotate-hint"),
-  rotateLandscape: document.getElementById("rotate-landscape"),
-  rotateDismiss: document.getElementById("rotate-dismiss"),
   spaceNav: document.getElementById("space-nav"),
   spaceModeLabel: document.getElementById("space-mode-label"),
   spaceTargetInfo: document.getElementById("space-target-info"),
@@ -2599,17 +2596,15 @@ function clearFlightInput() {
 }
 
 const touch = { roll: 0, pitch: 0, boost: false, brake: false, pid: null };
-const ROTATE_HINT_KEY = "fotw-rotate-hint-dismissed";
-let rotateHintDismissed = false;
 let landscapeRequested = false;
 let orientationFullscreenOwned = false;
-try { rotateHintDismissed = sessionStorage.getItem(ROTATE_HINT_KEY) === "1"; } catch { /* optional */ }
 
 function syncLandscapeButtons() {
   if (el.landscapeToggle) {
-    el.landscapeToggle.textContent = landscapeRequested ? "↶ Portrait" : "↻ Landscape";
+    el.landscapeToggle.textContent = landscapeRequested ? "↶" : "↻";
     el.landscapeToggle.setAttribute("aria-pressed", String(landscapeRequested));
     el.landscapeToggle.setAttribute("aria-label", landscapeRequested ? "Return to portrait view" : "Switch to landscape view");
+    el.landscapeToggle.title = landscapeRequested ? "Portrait view" : "Landscape view";
   }
 }
 
@@ -2621,29 +2616,28 @@ function syncVirtualLandscape() {
 
 async function requestLandscapeView() {
   if (!isMobile || landscapeRequested) return;
-  if (el.rotateLandscape) {
-    el.rotateLandscape.disabled = true;
-    el.rotateLandscape.textContent = "Rotating…";
-  }
+  let fullscreenRequest = null;
   try {
     if (!document.fullscreenElement && document.documentElement.requestFullscreen) {
-      await document.documentElement.requestFullscreen({ navigationUI: "hide" });
-      orientationFullscreenOwned = true;
+      fullscreenRequest = document.documentElement.requestFullscreen({ navigationUI: "hide" });
     }
   } catch { /* fullscreen is optional; CSS fallback still works */ }
+  // Rotate the game immediately. Native orientation locking is only an
+  // enhancement because it is unavailable in several mobile browsers.
+  landscapeRequested = true;
+  syncVirtualLandscape();
+  onResize();
+  if (fullscreenRequest) {
+    try {
+      await fullscreenRequest;
+      orientationFullscreenOwned = true;
+    } catch { /* CSS fallback is already active */ }
+  }
   try {
     if (screen.orientation?.lock) await screen.orientation.lock("landscape");
   } catch { /* iOS and some browsers do not expose orientation locking */ }
-  landscapeRequested = true;
-  rotateHintDismissed = true;
-  try { sessionStorage.setItem(ROTATE_HINT_KEY, "1"); } catch { /* optional */ }
   syncVirtualLandscape();
   onResize();
-  el.rotateHint?.classList.remove("show");
-  if (el.rotateLandscape) {
-    el.rotateLandscape.disabled = false;
-    el.rotateLandscape.textContent = "Play horizontally";
-  }
 }
 
 async function releaseLandscapeView() {
@@ -2734,15 +2728,9 @@ el.touchSpecial?.addEventListener("click", () => tryParachutistLaunch("rocket"))
 el.touchEnter?.addEventListener("click", handleSpaceEntryAction);
 el.touchCamera?.addEventListener("click", resetCameraView);
 el.touchPause?.addEventListener("click", () => setPaused(true));
-el.rotateLandscape?.addEventListener("click", requestLandscapeView);
 el.landscapeToggle?.addEventListener("click", () => {
   if (landscapeRequested) releaseLandscapeView();
   else requestLandscapeView();
-});
-el.rotateDismiss?.addEventListener("click", () => {
-  rotateHintDismissed = true;
-  el.rotateHint?.classList.remove("show");
-  try { sessionStorage.setItem(ROTATE_HINT_KEY, "1"); } catch { /* optional */ }
 });
 el.stick?.addEventListener("touchmove", (e) => e.preventDefault(), { passive: false });
 
@@ -2763,8 +2751,6 @@ function syncTouchUi() {
   el.touch.classList.toggle("hidden", !show);
   el.touch.classList.toggle("show", show);
   el.touch.classList.toggle("talk", !!(mp.active && mp.net));
-  const portraitPhone = isMobile && innerHeight > innerWidth && !landscapeRequested;
-  el.rotateHint?.classList.toggle("show", show && portraitPhone && !rotateHintDismissed);
   if (el.touchAction) {
     const isParachutist = selectedPlane === "parachutist";
     const isRocket = selectedPlane === "rocket";
@@ -2807,7 +2793,6 @@ function syncTouchUi() {
     resetStick();
     touch.boost = false;
     touch.brake = false;
-    el.rotateHint?.classList.remove("show");
   }
 }
 

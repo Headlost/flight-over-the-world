@@ -60,20 +60,26 @@ test.describe('mobile terrain recovery', () => {
     await expect.poll(() => page.evaluate(() => window.__dbg?.terrainCacheLimitBytes)).toBeLessThanOrEqual(96e6);
   });
 
-  test('portrait recommends landscape and landscape exposes complete touch actions', async ({page}) => {
+  test('small in-game control switches portrait play to landscape', async ({page}) => {
     await page.goto('/');
     await expect.poll(() => page.evaluate(() => !!window.__game)).toBe(true);
     expect(await page.evaluate(() => window.__testRocketLaunch())).toBe(true);
-    await expect(page.locator('#rotate-hint')).toBeVisible();
-    await expect(page.locator('#rotate-hint')).toContainText('Rotate your phone');
+    await expect(page.locator('#rotate-hint')).toHaveCount(0);
+    await expect(page.locator('#landscape-toggle')).toBeVisible();
+    await expect(page.locator('#landscape-toggle')).toHaveText('↻');
+    const toggleSize = await page.locator('#landscape-toggle').evaluate(button => {
+      const rect = button.getBoundingClientRect();
+      return {width:rect.width, height:rect.height};
+    });
+    expect(toggleSize.width).toBeLessThanOrEqual(42);
+    expect(toggleSize.height).toBeLessThanOrEqual(42);
     await page.evaluate(() => {
       Object.defineProperty(document.documentElement, 'requestFullscreen', {value:undefined, configurable:true});
       if (screen.orientation) Object.defineProperty(screen.orientation, 'lock', {value:async () => { throw new Error('unsupported'); }, configurable:true});
     });
-    await page.locator('#rotate-landscape').click();
-    await expect(page.locator('#rotate-hint')).toBeHidden();
+    await page.locator('#landscape-toggle').click();
     await expect(page.locator('html')).toHaveClass(/virtual-landscape/);
-    await expect(page.locator('#landscape-toggle')).toHaveText('↶ Portrait');
+    await expect(page.locator('#landscape-toggle')).toHaveText('↶');
     const virtualCanvas = await page.locator('#game-canvas').evaluate(canvas => ({width:canvas.width, height:canvas.height}));
     expect(virtualCanvas.width).toBeGreaterThan(virtualCanvas.height);
     await page.locator('#landscape-toggle').click();
@@ -118,7 +124,6 @@ test.describe('mobile terrain recovery', () => {
     await page.goto('/');
     await expect.poll(() => page.evaluate(() => !!window.__game)).toBe(true);
     expect(await page.evaluate(() => window.__testGroundedParachutist())).toBe(true);
-    await page.locator('#rotate-dismiss').click();
     await expect(page.locator('#street-view-link')).toBeVisible();
     await expect(page.locator('#movement-status')).toBeHidden();
     const layout = await page.evaluate(() => {
