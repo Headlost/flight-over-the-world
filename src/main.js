@@ -69,6 +69,8 @@ import {
   updateMusic,
   primeMusic,
   musicDebug,
+  isMusicMuted,
+  toggleMusic,
   setBlackHoleProximity,
   setBlackHoleTransitProgress,
   startBlackHoleFinale,
@@ -604,7 +606,13 @@ const el = {
   touchAction: document.getElementById("touch-action"),
   touchSpecial: document.getElementById("touch-special"),
   touchEnter: document.getElementById("touch-enter"),
+  gameTools: document.getElementById("game-tools"),
+  musicMenuToggle: document.getElementById("music-menu-toggle"),
+  musicLobbyToggle: document.getElementById("music-lobby-toggle"),
+  musicGameToggle: document.getElementById("music-game-toggle"),
+  landscapeToggle: document.getElementById("landscape-toggle"),
   rotateHint: document.getElementById("rotate-hint"),
+  rotateLandscape: document.getElementById("rotate-landscape"),
   rotateDismiss: document.getElementById("rotate-dismiss"),
   spaceNav: document.getElementById("space-nav"),
   spaceModeLabel: document.getElementById("space-mode-label"),
@@ -1726,6 +1734,7 @@ function abortRematchToLobby() {
 }
 
 function backToLobby() {
+  releaseLandscapeView();
   hideBanner();
   menuOpen = true;
   timerActive = false;
@@ -1785,7 +1794,8 @@ function init() {
   renderer.setClearColor(0x8ec8e8);
   renderer.outputColorSpace = SRGBColorSpace;
   applyPixelRatio();
-  renderer.setSize(innerWidth, innerHeight);
+  const initialViewport = gameViewportSize();
+  renderer.setSize(initialViewport.width, initialViewport.height);
   renderer.toneMapping = 4;
   renderer.toneMappingExposure = EARTH_EXPOSURE;
   renderer.shadowMap.enabled = QUALITY[settings.quality].shadows;
@@ -1808,7 +1818,7 @@ function init() {
   scene.add(sun);
   scene.add(sun.target);
 
-  camera = new PerspectiveCamera(70, innerWidth / innerHeight, 1, 2e6);
+  camera = new PerspectiveCamera(70, initialViewport.width / initialViewport.height, 1, 2e6);
   // One low-resolution camera sweeps off-screen directions progressively. This
   // leaves bandwidth and GPU time for the player's visible view first.
   detailCameras = [new PerspectiveCamera(84, 16 / 9, 0.1, 1400)];
@@ -2071,15 +2081,24 @@ function applyPixelRatio() {
   if (!renderer) return;
   const gl = renderer.getContext();
   const size = Math.min(renderer.capabilities.maxTextureSize, ...gl.getParameter(gl.MAX_VIEWPORT_DIMS));
-  renderer.setPixelRatio(renderRatio(settings.quality, innerWidth, innerHeight, devicePixelRatio || 1, size) * (settings.adaptive ? adaptiveQuality.scale : 1));
+  const viewport = gameViewportSize();
+  renderer.setPixelRatio(renderRatio(settings.quality, viewport.width, viewport.height, devicePixelRatio || 1, size) * (settings.adaptive ? adaptiveQuality.scale : 1));
+}
+
+function gameViewportSize() {
+  return document.documentElement.classList.contains("virtual-landscape")
+    ? { width: innerHeight, height: innerWidth }
+    : { width: innerWidth, height: innerHeight };
 }
 
 function onResize() {
   if (!camera || !renderer) return;
-  camera.aspect = innerWidth / innerHeight;
+  syncVirtualLandscape();
+  const viewport = gameViewportSize();
+  camera.aspect = viewport.width / viewport.height;
   camera.updateProjectionMatrix();
   applyPixelRatio();
-  renderer.setSize(innerWidth, innerHeight);
+  renderer.setSize(viewport.width, viewport.height);
 }
 
 function frameAt(lat, lon, height, az, elv, roll, target = new Matrix4()) {
@@ -2247,6 +2266,22 @@ function unlockAudio() {
 window.addEventListener("pointerdown", unlockAudio);
 window.addEventListener("keydown", unlockAudio);
 
+const musicButtons = [el.musicMenuToggle, el.musicLobbyToggle, el.musicGameToggle].filter(Boolean);
+function syncMusicButtons() {
+  const muted = isMusicMuted();
+  for (const button of musicButtons) {
+    button.textContent = muted ? "🔇 Music off" : "🔊 Music on";
+    button.setAttribute("aria-pressed", String(muted));
+    button.setAttribute("aria-label", muted ? "Turn music on" : "Turn music off");
+  }
+}
+function handleMusicToggle() {
+  toggleMusic();
+  syncMusicButtons();
+}
+for (const button of musicButtons) button.addEventListener("click", handleMusicToggle);
+syncMusicButtons();
+
 el.start.addEventListener("click", () => {
   unlockAudio();
   startGame();
@@ -2315,6 +2350,7 @@ el.restart.addEventListener("click", () => {
 });
 
 function backToMenu() {
+  releaseLandscapeView();
   leaveSpaceFlight();
   hideBanner();
   menuOpen = true;
@@ -2565,7 +2601,63 @@ function clearFlightInput() {
 const touch = { roll: 0, pitch: 0, boost: false, brake: false, pid: null };
 const ROTATE_HINT_KEY = "fotw-rotate-hint-dismissed";
 let rotateHintDismissed = false;
+let landscapeRequested = false;
+let orientationFullscreenOwned = false;
 try { rotateHintDismissed = sessionStorage.getItem(ROTATE_HINT_KEY) === "1"; } catch { /* optional */ }
+
+function syncLandscapeButtons() {
+  if (el.landscapeToggle) {
+    el.landscapeToggle.textContent = landscapeRequested ? "↶ Portrait" : "↻ Landscape";
+    el.landscapeToggle.setAttribute("aria-pressed", String(landscapeRequested));
+    el.landscapeToggle.setAttribute("aria-label", landscapeRequested ? "Return to portrait view" : "Switch to landscape view");
+  }
+}
+
+function syncVirtualLandscape() {
+  const useFallback = landscapeRequested && innerHeight > innerWidth;
+  document.documentElement.classList.toggle("virtual-landscape", useFallback);
+  syncLandscapeButtons();
+}
+
+async function requestLandscapeView() {
+  if (!isMobile || landscapeRequested) return;
+  if (el.rotateLandscape) {
+    el.rotateLandscape.disabled = true;
+    el.rotateLandscape.textContent = "Rotating…";
+  }
+  try {
+    if (!document.fullscreenElement && document.documentElement.requestFullscreen) {
+      await document.documentElement.requestFullscreen({ navigationUI: "hide" });
+      orientationFullscreenOwned = true;
+    }
+  } catch { /* fullscreen is optional; CSS fallback still works */ }
+  try {
+    if (screen.orientation?.lock) await screen.orientation.lock("landscape");
+  } catch { /* iOS and some browsers do not expose orientation locking */ }
+  landscapeRequested = true;
+  rotateHintDismissed = true;
+  try { sessionStorage.setItem(ROTATE_HINT_KEY, "1"); } catch { /* optional */ }
+  syncVirtualLandscape();
+  onResize();
+  el.rotateHint?.classList.remove("show");
+  if (el.rotateLandscape) {
+    el.rotateLandscape.disabled = false;
+    el.rotateLandscape.textContent = "Play horizontally";
+  }
+}
+
+async function releaseLandscapeView() {
+  if (!landscapeRequested && !document.documentElement.classList.contains("virtual-landscape")) return;
+  landscapeRequested = false;
+  try { screen.orientation?.unlock?.(); } catch { /* optional */ }
+  document.documentElement.classList.remove("virtual-landscape");
+  syncLandscapeButtons();
+  onResize();
+  if (orientationFullscreenOwned && document.fullscreenElement && document.exitFullscreen) {
+    try { await document.exitFullscreen(); } catch { /* optional */ }
+  }
+  orientationFullscreenOwned = false;
+}
 
 function resetStick() {
   touch.roll = 0;
@@ -2642,6 +2734,11 @@ el.touchSpecial?.addEventListener("click", () => tryParachutistLaunch("rocket"))
 el.touchEnter?.addEventListener("click", handleSpaceEntryAction);
 el.touchCamera?.addEventListener("click", resetCameraView);
 el.touchPause?.addEventListener("click", () => setPaused(true));
+el.rotateLandscape?.addEventListener("click", requestLandscapeView);
+el.landscapeToggle?.addEventListener("click", () => {
+  if (landscapeRequested) releaseLandscapeView();
+  else requestLandscapeView();
+});
 el.rotateDismiss?.addEventListener("click", () => {
   rotateHintDismissed = true;
   el.rotateHint?.classList.remove("show");
@@ -2652,6 +2749,7 @@ el.stick?.addEventListener("touchmove", (e) => e.preventDefault(), { passive: fa
 function syncTouchUi() {
   if (!el.touch) return;
   const show = !menuOpen && !paused && !guessOpen && !crashed && !finished && !streetModeActive;
+  if (el.gameTools) el.gameTools.hidden = menuOpen || guessOpen || crashed || finished || streetModeActive;
   const nearestSpaceBody = spaceModeActive ? spaceFlight.nearestBody() : null;
   const orbitBody = spaceFlight.orbitBody ? spaceFlight.bodies.get(spaceFlight.orbitBody) : null;
   const canEnterOrbit = !!nearestSpaceBody
@@ -2665,7 +2763,7 @@ function syncTouchUi() {
   el.touch.classList.toggle("hidden", !show);
   el.touch.classList.toggle("show", show);
   el.touch.classList.toggle("talk", !!(mp.active && mp.net));
-  const portraitPhone = isMobile && innerHeight > innerWidth;
+  const portraitPhone = isMobile && innerHeight > innerWidth && !landscapeRequested;
   el.rotateHint?.classList.toggle("show", show && portraitPhone && !rotateHintDismissed);
   if (el.touchAction) {
     const isParachutist = selectedPlane === "parachutist";

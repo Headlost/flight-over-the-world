@@ -2,6 +2,7 @@ const BACKGROUND_GAIN = 0.22;
 const BLACK_HOLE_GAIN = 0.48;
 const BLACK_HOLE_ENTRY_MIX = 0.25;
 const BLACK_HOLE_CUE_SECONDS = 45;
+const MUSIC_MUTED_KEY = "fotw-music-muted";
 
 const background = document.getElementById("bgm");
 const blackHoleScore = document.getElementById("black-hole-score");
@@ -10,17 +11,22 @@ let blackHoleProximity = 0;
 let blackHoleTransit = false;
 let blackHoleTransitProgress = 0;
 let resetScoreWhenSilent = false;
+let musicMuted = false;
+
+try { musicMuted = localStorage.getItem(MUSIC_MUTED_KEY) === "1"; } catch { /* optional */ }
 
 if (background) {
   background.loop = true;
   background.volume = BACKGROUND_GAIN;
+  background.muted = musicMuted;
   window.__bgm = background;
-  background.play().catch(() => {});
+  if (!musicMuted) background.play().catch(() => {});
 }
 
 if (blackHoleScore) {
   blackHoleScore.loop = false;
   blackHoleScore.volume = 0;
+  blackHoleScore.muted = musicMuted;
   window.__blackHoleScore = blackHoleScore;
 }
 
@@ -29,7 +35,7 @@ function approach(value, target, response = 4.2) {
 }
 
 function playBlackHoleScore() {
-  if (!blackHoleScore || document.hidden) return;
+  if (!blackHoleScore || document.hidden || musicMuted) return;
   blackHoleScore.play().catch(() => {});
 }
 
@@ -90,6 +96,7 @@ export function stopBlackHoleScore() {
 }
 
 export function updateMusic() {
+  if (musicMuted) return;
   const blackHoleActive = blackHoleTransit || blackHoleProximity > 0.015;
   const proximityMix = blackHoleProximity > 0
     ? BLACK_HOLE_ENTRY_MIX + (1 - BLACK_HOLE_ENTRY_MIX) * Math.pow(blackHoleProximity, 0.68)
@@ -119,12 +126,35 @@ export function updateMusic() {
 }
 
 export function primeMusic() {
+  if (musicMuted) return;
   background?.play().catch(() => {});
   if (blackHoleProximity > 0.015 || blackHoleTransit) playBlackHoleScore();
 }
 
+export function setMusicMuted(value) {
+  musicMuted = !!value;
+  if (background) background.muted = musicMuted;
+  if (blackHoleScore) blackHoleScore.muted = musicMuted;
+  if (musicMuted) {
+    background?.pause();
+    blackHoleScore?.pause();
+  }
+  try { localStorage.setItem(MUSIC_MUTED_KEY, musicMuted ? "1" : "0"); } catch { /* optional */ }
+  if (!musicMuted) primeMusic();
+  return musicMuted;
+}
+
+export function toggleMusic() {
+  return setMusicMuted(!musicMuted);
+}
+
+export function isMusicMuted() {
+  return musicMuted;
+}
+
 export function musicDebug() {
   return {
+    muted: musicMuted,
     paused: background?.paused ?? null,
     time: background ? Math.round(background.currentTime * 10) / 10 : null,
     gain: background?.volume ?? null,

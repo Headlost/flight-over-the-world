@@ -7,6 +7,11 @@
 }
 
 #settings-toggle { position: fixed; right: 16px; top: 14px; z-index: 70; padding: 9px 16px; font: 600 13px system-ui; background: #17212de8; color: #eef6ff; border: 1px solid #91aac855; border-radius: 9px; cursor: pointer; }
+#game-tools { position: fixed; right: 16px; top: 58px; z-index: 70; display: flex; gap: 7px; }
+#game-tools[hidden] { display: none; }
+#game-tools button { width: auto; min-height: 38px; margin: 0; padding: 8px 12px; border: 1px solid #91aac866; border-radius: 9px; background: #17212de8; color: #eef6ff; font: 700 12px/1.2 system-ui; cursor: pointer; box-shadow: 0 7px 22px #0004; }
+#game-tools button:hover, #game-tools button:focus-visible { background: #26394de8; }
+#landscape-toggle { display: none; }
 .flight-dialog { width: min(620px, calc(100vw - 24px)); max-height: calc(100dvh - 32px); overflow: auto; padding: 26px; color: #eaf2ff; background: #101c29; border: 1px solid #638098; border-radius: 18px; box-shadow: 0 24px 90px #000a; font: 14px/1.6 system-ui, sans-serif; }
 .flight-dialog::backdrop { background: #030b16cc; backdrop-filter: blur(8px); }
 .flight-dialog h2 { margin: 0; font-size: 23px; }
@@ -35,7 +40,7 @@ input[style*="display: none"] + .pick-location, input.locked + .pick-location { 
 #map-credits { position: fixed; bottom: 0; right: 0; z-index: 65; display: flex; flex-wrap: wrap; justify-content: flex-end; align-items: center; gap: 8px; max-width: 100%; padding: 3px 8px; background: #0a1322d9; color: white; font: 10px/1.4 system-ui; }
 #map-credits a { color: white; }
 #map-credits img { max-height: 22px; max-width: 100px; }
-#flight-status { position: fixed; top: 58px; right: 16px; z-index: 4; max-width: min(430px, 80vw); padding: 6px 10px; background: #09131cb3; border-radius: 6px; color: #eaf2ff; font: 11px/1.5 system-ui; pointer-events: none; }
+#flight-status { position: fixed; top: 104px; right: 16px; z-index: 4; max-width: min(430px, 80vw); padding: 6px 10px; background: #09131cb3; border-radius: 6px; color: #eaf2ff; font: 11px/1.5 system-ui; pointer-events: none; }
 #flight-status:empty { display: none; }
 #movement-status { position: fixed; left: 50%; bottom: 126px; z-index: 4; transform: translateX(-50%); max-width: min(680px, calc(100vw - 28px)); padding: 8px 13px; border: 1px solid #7ec8e380; border-radius: 999px; background: #09131cd9; color: #f4f8ff; font: 700 11px/1.4 system-ui; letter-spacing: .045em; text-align: center; pointer-events: none; }
 #movement-status[hidden] { display: none; }
@@ -838,6 +843,21 @@ kbd {
   margin-bottom: 20px;
 }
 
+.menu-music-toggle {
+  width: auto;
+  margin: -8px auto 14px;
+  padding: 8px 14px;
+  border: 1px solid rgba(243, 234, 214, 0.24);
+  border-radius: 999px;
+  background: rgba(243, 234, 214, 0.07);
+  color: var(--paper);
+  font: 700 13px/1.2 system-ui, sans-serif;
+  cursor: pointer;
+}
+
+.menu-music-toggle:hover,
+.menu-music-toggle:focus-visible { background: rgba(216, 162, 74, 0.2); }
+
 .modes.single-mode {
   grid-template-columns: 1fr;
 }
@@ -1362,11 +1382,19 @@ kbd {
   font: 700 14px/1.2 system-ui, sans-serif;
 }
 
+.rotate-card .rotate-primary {
+  border-color: var(--gold);
+  background: var(--gold);
+  color: #1c1710;
+}
+
 @media (hover: none), (pointer: coarse), (max-width: 720px) {
   .hint-desk { display: none; }
   .hint-touch { display: block; }
   #touch.show { display: block; }
+  #landscape-toggle { display: block; }
   #space-action-hint { display: none; }
+  body.parachutist-selected #movement-status { display: none !important; }
 
   #f-instruments {
     left: 10px;
@@ -1397,6 +1425,16 @@ kbd {
   #space-targets button { flex: 0 0 auto; }
 
   .f-box span:last-child { font-size: 16px; }
+}
+
+@media (orientation: portrait) and (hover: none),
+       (orientation: portrait) and (pointer: coarse),
+       (orientation: portrait) and (max-width: 720px) {
+  body.parachutist-selected #street-view-link {
+    top: max(162px, calc(env(safe-area-inset-top) + 148px));
+    bottom: auto;
+    left: 50%;
+  }
 }
 
 @media (prefers-reduced-motion: reduce) {
@@ -1435,12 +1473,69 @@ kbd {
 
   body.space-mode #space-nav {
     left: max(8px, env(safe-area-inset-left));
-    right: max(102px, calc(env(safe-area-inset-right) + 94px));
+    right: max(188px, calc(env(safe-area-inset-right) + 180px));
     width: auto;
     transform: none;
   }
 
   #street-view-link { left: 35%; }
+}
+
+@media (orientation: landscape) and (max-height: 500px) {
+  #settings-toggle { top: max(6px, env(safe-area-inset-top)); right: max(8px, env(safe-area-inset-right)); padding: 7px 10px; font-size: 11px; }
+  #game-tools { top: max(44px, calc(env(safe-area-inset-top) + 38px)); right: max(8px, env(safe-area-inset-right)); }
+  #game-tools button { min-height: 34px; padding: 6px 9px; font-size: 10px; }
+  #stick { width: clamp(96px, 30vh, 126px); height: clamp(96px, 30vh, 126px); }
+  #stick-knob { width: 44px; height: 44px; margin: -22px 0 0 -22px; }
+  .touch-btns { bottom: max(14px, calc(env(safe-area-inset-bottom) + 8px)); }
+  .touch-btns button { min-height: clamp(34px, 11vh, 42px); padding: 5px 6px; font-size: 10px; }
+  .gauge { width: 52px; height: 52px; }
+  #f-center { top: max(62px, calc(env(safe-area-inset-top) + 54px)); }
+}
+
+@media (orientation: portrait) {
+  html.virtual-landscape body {
+    position: fixed;
+    top: 100vh;
+    left: 0;
+    width: 100vh;
+    height: 100vw;
+    transform: rotate(-90deg);
+    transform-origin: left top;
+    overflow: hidden;
+  }
+
+  html.virtual-landscape #rotate-hint { display: none !important; }
+  html.virtual-landscape #stick {
+    left: max(18px, env(safe-area-inset-bottom));
+    bottom: max(16px, env(safe-area-inset-left));
+    width: clamp(96px, 30vw, 126px);
+    height: clamp(96px, 30vw, 126px);
+  }
+  html.virtual-landscape #stick-knob { width: 44px; height: 44px; margin: -22px 0 0 -22px; }
+  html.virtual-landscape .touch-btns {
+    right: max(12px, env(safe-area-inset-top));
+    bottom: max(14px, env(safe-area-inset-right));
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    width: min(390px, 48vh);
+    gap: 6px;
+  }
+  html.virtual-landscape .touch-btns button {
+    min-height: clamp(34px, 11vw, 42px);
+    padding: 5px 6px;
+    font-size: 10px;
+  }
+  html.virtual-landscape #touch-action,
+  html.virtual-landscape #touch-special,
+  html.virtual-landscape #touch-enter { grid-column: auto; }
+  html.virtual-landscape #settings-toggle { top: max(6px, env(safe-area-inset-right)); right: max(8px, env(safe-area-inset-top)); padding: 7px 10px; font-size: 11px; }
+  html.virtual-landscape #game-tools { top: max(44px, calc(env(safe-area-inset-right) + 38px)); right: max(8px, env(safe-area-inset-top)); }
+  html.virtual-landscape #game-tools button { min-height: 34px; padding: 6px 9px; font-size: 10px; }
+  html.virtual-landscape #space-nav { width: calc(100vh - 16px); }
+  html.virtual-landscape body.space-mode #space-nav { left: max(8px, env(safe-area-inset-bottom)); right: max(188px, calc(env(safe-area-inset-top) + 180px)); width: auto; transform: none; }
+  html.virtual-landscape #street-view-link { left: 35%; top: auto; bottom: max(70px, calc(env(safe-area-inset-right) + 56px)); }
+  html.virtual-landscape .gauge { width: 52px; height: 52px; }
+  html.virtual-landscape #f-center { top: max(62px, calc(env(safe-area-inset-right) + 54px)); }
 }
 
 @media (max-width: 720px), (max-height: 820px) {

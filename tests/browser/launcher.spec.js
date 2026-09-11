@@ -66,8 +66,18 @@ test.describe('mobile terrain recovery', () => {
     expect(await page.evaluate(() => window.__testRocketLaunch())).toBe(true);
     await expect(page.locator('#rotate-hint')).toBeVisible();
     await expect(page.locator('#rotate-hint')).toContainText('Rotate your phone');
-    await page.locator('#rotate-dismiss').click();
+    await page.evaluate(() => {
+      Object.defineProperty(document.documentElement, 'requestFullscreen', {value:undefined, configurable:true});
+      if (screen.orientation) Object.defineProperty(screen.orientation, 'lock', {value:async () => { throw new Error('unsupported'); }, configurable:true});
+    });
+    await page.locator('#rotate-landscape').click();
     await expect(page.locator('#rotate-hint')).toBeHidden();
+    await expect(page.locator('html')).toHaveClass(/virtual-landscape/);
+    await expect(page.locator('#landscape-toggle')).toHaveText('↶ Portrait');
+    const virtualCanvas = await page.locator('#game-canvas').evaluate(canvas => ({width:canvas.width, height:canvas.height}));
+    expect(virtualCanvas.width).toBeGreaterThan(virtualCanvas.height);
+    await page.locator('#landscape-toggle').click();
+    await expect(page.locator('html')).not.toHaveClass(/virtual-landscape/);
 
     await page.setViewportSize({width: 851, height: 393});
     await expect(page.locator('#touch')).toHaveClass(/show/);
@@ -103,6 +113,43 @@ test.describe('mobile terrain recovery', () => {
     await expect(page.locator('#touch-enter')).toHaveClass(/space-context-ready/);
     await page.screenshot({path:'test-results/mobile-controls-landscape.png'});
   });
+
+  test('portrait parachutist keeps Street View clear and hides the controls pill', async ({page}) => {
+    await page.goto('/');
+    await expect.poll(() => page.evaluate(() => !!window.__game)).toBe(true);
+    expect(await page.evaluate(() => window.__testGroundedParachutist())).toBe(true);
+    await page.locator('#rotate-dismiss').click();
+    await expect(page.locator('#street-view-link')).toBeVisible();
+    await expect(page.locator('#movement-status')).toBeHidden();
+    const layout = await page.evaluate(() => {
+      const street = document.querySelector('#street-view-link').getBoundingClientRect();
+      const buttons = document.querySelector('.touch-btns').getBoundingClientRect();
+      const status = document.querySelector('#flight-status').getBoundingClientRect();
+      return {street:{...street.toJSON()}, buttons:{...buttons.toJSON()}, status:{...status.toJSON()}};
+    });
+    expect(layout.street.top).toBeGreaterThanOrEqual(layout.status.bottom);
+    expect(layout.street.bottom).toBeLessThan(layout.buttons.top);
+    await page.screenshot({path:'test-results/mobile-parachutist-portrait.png'});
+  });
+});
+
+test('music toggles stay synchronized between vehicle selection and gameplay', async ({page}) => {
+  await page.goto('/');
+  await page.getByRole('button',{name:'Single player',exact:true}).click();
+  await expect(page.locator('#music-menu-toggle')).toHaveText('🔊 Music on');
+  await page.locator('#music-menu-toggle').click();
+  await expect(page.locator('#music-menu-toggle')).toHaveText('🔇 Music off');
+  await expect(page.locator('#music-lobby-toggle')).toHaveText('🔇 Music off');
+  expect(await page.evaluate(() => ({muted:window.__bgm.muted, paused:window.__bgm.paused, saved:localStorage.getItem('fotw-music-muted')})))
+    .toEqual({muted:true, paused:true, saved:'1'});
+
+  expect(await page.evaluate(() => window.__testGroundedParachutist())).toBe(true);
+  await expect(page.locator('#game-tools')).toBeVisible();
+  await expect(page.locator('#music-game-toggle')).toHaveText('🔇 Music off');
+  await page.locator('#music-game-toggle').click();
+  await expect(page.locator('#music-menu-toggle')).toHaveText('🔊 Music on');
+  expect(await page.evaluate(() => ({muted:window.__bgm.muted, saved:localStorage.getItem('fotw-music-muted')})))
+    .toEqual({muted:false, saved:'0'});
 });
 
 test('parachutist is selectable and its animated model is bundled', async ({page}) => {

@@ -58,6 +58,7 @@
           <span id="lobby-car-name">Piper PA-28</span>
           <span id="lobby-car-desc">Light propeller – 170 km/h</span>
         </div>
+        <button id="music-lobby-toggle" class="menu-music-toggle" type="button" aria-pressed="false">🔊 Music on</button>
         <div class="modes lobby-modes single-mode">
           <button class="mode-card selected" data-mode="free" type="button">
             <span class="m-name">Free flight</span>
@@ -93,6 +94,7 @@
           <span id="car-name">Piper PA-28</span>
           <span id="car-desc">Light propeller – 170 km/h</span>
         </div>
+        <button id="music-menu-toggle" class="menu-music-toggle" type="button" aria-pressed="false">🔊 Music on</button>
 
         <div class="modes single-mode">
           <button class="mode-card selected" data-mode="free" type="button">
@@ -188,11 +190,17 @@
       </div>
     </div>
 
+    <div id="game-tools" hidden aria-label="Game controls">
+      <button id="music-game-toggle" type="button" aria-pressed="false">🔊 Music on</button>
+      <button id="landscape-toggle" type="button" aria-pressed="false">↻ Landscape</button>
+    </div>
+
     <div id="rotate-hint" aria-live="polite" aria-label="Landscape controls recommendation">
       <div class="rotate-card">
         <div class="rotate-phone" aria-hidden="true">↻</div>
         <strong>Rotate your phone</strong>
         <span>Landscape view gives you a wider flight view and the complete controls.</span>
+        <button id="rotate-landscape" class="rotate-primary" type="button">Play horizontally</button>
         <button id="rotate-dismiss" type="button">Continue vertically</button>
       </div>
     </div>
