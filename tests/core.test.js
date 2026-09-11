@@ -25,7 +25,7 @@ import { streetViewUrl } from '../src/game/streetview.js';
 import { SpaceFlightController } from '../src/game/space.js';
 import { ContactConfirmation, parachutistCameraClimbAssist, raycastVisibleTerrain, rocketLaunchCameraPhase, updateChaseOffset } from '../src/game/flightSafety.js';
 import { classifyPlayerContact, clampBumpVector, MAX_PLAYER_BUMP, PLAYER_STACK_HEIGHT } from '../src/game/playerInteraction.js';
-import { invitationText, roomInvitationLink, shareDestination, webSharePayload } from '../src/game/sharing.js';
+import { roomInvitationLink } from '../src/game/sharing.js';
 import { Box3, Group, Mesh, BoxGeometry, MeshBasicMaterial, Quaternion, Raycaster, Texture, Vector3 } from 'three';
 
 test('coordinates bypass network and geographic bounds are validated', async () => {
@@ -135,7 +135,7 @@ test('lobby chat is compact and strips control characters', () => {
   assert.equal(normalizeChatMessage('\u0000\t'), '');
 });
 
-test('room invitations use the public game from local development and share links instead of QR files', () => {
+test('room invitations use the public game from local development', () => {
   const room = 'lns-test-room';
   const publicLink = roomInvitationLink('http://127.0.0.1:5173/?debug=1#old', room);
   assert.equal(publicLink, `https://headlost.github.io/flight-over-the-world/#r=${room}`);
@@ -143,16 +143,6 @@ test('room invitations use the public game from local development and share link
     roomInvitationLink('https://example.com/game/?campaign=test#old', room),
     `https://example.com/game/#r=${room}`,
   );
-  assert.ok(invitationText(publicLink).endsWith(publicLink));
-  const payload = webSharePayload(publicLink);
-  assert.deepEqual(Object.keys(payload).sort(), ['text', 'title', 'url']);
-  assert.equal(Object.hasOwn(payload, 'files'), false);
-  assert.match(shareDestination('whatsapp', publicLink), /^https:\/\/wa\.me\//);
-  assert.match(shareDestination('facebook', publicLink), /^https:\/\/www\.facebook\.com\/sharer/);
-  assert.match(shareDestination('telegram', publicLink), /^https:\/\/t\.me\/share\/url/);
-  assert.match(shareDestination('email', publicLink), /^mailto:/);
-  assert.match(shareDestination('sms', publicLink), /^sms:/);
-  assert.equal(shareDestination('youtube', publicLink), '');
 });
 
 test('multiplayer rosters and seat maps have no fixed player-count cap', () => {

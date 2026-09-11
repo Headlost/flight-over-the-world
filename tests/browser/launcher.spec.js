@@ -160,19 +160,26 @@ test.describe('mobile terrain recovery', () => {
     expect(layout.buttonBottom).toBeLessThanOrEqual(layout.creditTop);
   });
 
-  test('mobile lobby shares a public room link with popular apps', async ({page}) => {
+  test('mobile lobby keeps the public room link available without extra share panels', async ({page}) => {
     await page.setViewportSize({width:390,height:844});
     await page.goto('/');
     await expect.poll(() => page.evaluate(() => !!window.__game)).toBe(true);
     await page.getByRole('button',{name:'Multiplayer',exact:true}).click();
     expect(await page.evaluate(() => window.__testPopulateLobby(2))).toBe(2);
     await expect(page.locator('#lobby-qr')).toBeHidden();
-    await expect(page.locator('#lobby-share')).toBeVisible();
-    await expect(page.locator('#lobby-share-options button')).toHaveCount(6);
+    await expect(page.locator('#lobby-share')).toHaveCount(0);
     await expect(page.locator('#lobby-link')).toHaveValue('https://headlost.github.io/flight-over-the-world/#r=test-host');
-    await page.locator('#lobby-share').scrollIntoViewIfNeeded();
-    await page.screenshot({path:'test-results/mobile-lobby-sharing.png',fullPage:true});
   });
+});
+
+test('opening a copied room link boots the guest lobby without freezing', async ({page}) => {
+  const pageErrors = [];
+  page.on('pageerror', error => pageErrors.push(error.message));
+  await page.goto('/#r=lns-test-room');
+  await expect.poll(() => page.evaluate(() => !!window.__game)).toBe(true);
+  await expect(page.locator('#lobby')).toBeVisible();
+  await expect(page.locator('#loader')).toBeHidden();
+  expect(pageErrors).toEqual([]);
 });
 
 test('multiplayer aircraft labels show the nickname and live microphone icon', async ({page}) => {
@@ -195,9 +202,8 @@ test('large multiplayer lobbies scroll and keep chat below the QR panel', async 
   await expect(page.locator('#lobby-players .player-row')).toHaveCount(40);
   await expect(page.locator('#lobby-chat-count')).toHaveText('40 players');
   await expect(page.locator('#lobby-link')).toHaveValue('https://headlost.github.io/flight-over-the-world/#r=test-host');
-  await expect(page.locator('#lobby-share')).toBeVisible();
-  await expect(page.locator('#lobby-share-options button')).toHaveCount(6);
-  await expect(page.locator('[data-share-target="youtube"]')).toHaveAttribute('title', /Copy an invitation/);
+  await expect(page.locator('.lobby-qr-actions button')).toHaveCount(1);
+  await expect(page.locator('#lobby-qr-copy')).toHaveText('Copy QR');
   await expect(page.locator('[data-player-id="test-host"] .player-role-badge')).toHaveText('Admin');
   await expect(page.locator('[data-player-id="test-host"] .player-role-badge')).toHaveClass(/admin/);
 

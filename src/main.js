@@ -12,7 +12,6 @@ import {
 } from './game/protocol.js';
 import { attributionSignature, renderAttributions } from './game/attribution.js';
 import QRCode from 'qrcode';
-import { invitationText, shareDestination, webSharePayload } from './game/sharing.js';
 import {
   WGS84_ELLIPSOID,
   CAMERA_FRAME,
@@ -623,12 +622,7 @@ const el = {
   lobbyQr: document.getElementById("lobby-qr"),
   lobbyQrCanvas: document.getElementById("lobby-qr-canvas"),
   lobbyQrCopy: document.getElementById("lobby-qr-copy"),
-  lobbyQrShare: document.getElementById("lobby-qr-share"),
   lobbyQrFeedback: document.getElementById("lobby-qr-feedback"),
-  lobbyShare: document.getElementById("lobby-share"),
-  lobbyShareMore: document.getElementById("lobby-share-more"),
-  lobbyShareOptions: document.getElementById("lobby-share-options"),
-  lobbyShareFeedback: document.getElementById("lobby-share-feedback"),
   lobbyChat: document.getElementById("lobby-chat"),
   lobbyChatMessages: document.getElementById("lobby-chat-messages"),
   lobbyChatForm: document.getElementById("lobby-chat-form"),
@@ -890,18 +884,6 @@ function setLobbyQrFeedback(message = "") {
 
 function setLobbyQrButtons(enabled) {
   if (el.lobbyQrCopy) el.lobbyQrCopy.disabled = !enabled;
-  if (el.lobbyQrShare) el.lobbyQrShare.disabled = !enabled;
-}
-
-function setLobbyShareFeedback(message = "") {
-  if (el.lobbyShareFeedback) el.lobbyShareFeedback.textContent = message;
-}
-
-function setLobbyShareButtons(enabled) {
-  if (el.lobbyShareMore) el.lobbyShareMore.disabled = !enabled;
-  for (const button of el.lobbyShareOptions?.querySelectorAll("button") || []) {
-    button.disabled = !enabled;
-  }
 }
 
 async function updateLobbyQr(link = "") {
@@ -941,16 +923,6 @@ async function updateLobbyQr(link = "") {
   }
 }
 
-function downloadLobbyQr() {
-  if (!lobbyQrState.blob) return;
-  const url = URL.createObjectURL(lobbyQrState.blob);
-  const link = document.createElement("a");
-  link.href = url;
-  link.download = `flight-room-${mp.roomId || "invite"}.png`;
-  link.click();
-  setTimeout(() => URL.revokeObjectURL(url), 1000);
-}
-
 async function copyLobbyQr() {
   if (!lobbyQrState.blob) return false;
   if (navigator.clipboard?.write && typeof ClipboardItem !== "undefined") {
@@ -958,40 +930,6 @@ async function copyLobbyQr() {
     return true;
   }
   return false;
-}
-
-async function copyLobbyInvitation(link = lobbyQrState.link || el.lobbyLink?.value || "") {
-  if (!link) return false;
-  const text = invitationText(link);
-  if (navigator.clipboard?.writeText) {
-    await navigator.clipboard.writeText(text);
-    return true;
-  }
-  if (!el.lobbyLink) return false;
-  el.lobbyLink.focus();
-  el.lobbyLink.select();
-  return document.execCommand?.("copy") === true;
-}
-
-async function shareLobbyInvitation() {
-  const link = lobbyQrState.link || el.lobbyLink?.value || "";
-  if (!link) return false;
-  if (!navigator.share) return false;
-  await navigator.share(webSharePayload(link));
-  return true;
-}
-
-function openLobbyShareTarget(target) {
-  const link = lobbyQrState.link || el.lobbyLink?.value || "";
-  if (!link) return false;
-  const destination = shareDestination(target, link);
-  if (!destination) return false;
-  if (target === "email" || target === "sms") {
-    location.href = destination;
-  } else {
-    window.open(destination, "_blank", "noopener,noreferrer");
-  }
-  return true;
 }
 
 function otherPlayers() {
@@ -1191,8 +1129,6 @@ function renderLobby() {
   el.lobbyCity.readOnly = !mp.host;
   const link = mp.roomId ? roomLink(mp.roomId) : "";
   el.lobbyLink.value = link;
-  setLobbyShareButtons(!!link);
-  if (!link) setLobbyShareFeedback("");
   updateLobbyQr(link);
   renderLobbyChat();
 
@@ -2773,55 +2709,9 @@ el.lobbyQrCopy?.addEventListener("click", async () => {
       return;
     }
   } catch {
-    /* Fall through to a local PNG download. */
+    /* The message below provides a non-destructive fallback. */
   }
-  downloadLobbyQr();
-  setLobbyQrFeedback("Image copy is unavailable here, so the QR was downloaded.");
-});
-el.lobbyQrShare?.addEventListener("click", () => {
-  downloadLobbyQr();
-  setLobbyQrFeedback("QR image saved.");
-});
-el.lobbyShareOptions?.addEventListener("click", async (event) => {
-  const button = event.target.closest("button[data-share-target]");
-  if (!button) return;
-  const target = button.dataset.shareTarget;
-  if (target === "youtube") {
-    try {
-      if (await copyLobbyInvitation()) {
-        setLobbyShareFeedback("Invitation copied — paste it into a YouTube post or video description.");
-        return;
-      }
-    } catch {
-      /* The fallback below explains how to copy it manually. */
-    }
-    el.lobbyLink.select();
-    setLobbyShareFeedback("Copy the selected link and paste it into YouTube.");
-    return;
-  }
-  if (openLobbyShareTarget(target)) {
-    setLobbyShareFeedback(`${button.textContent.trim()} opened.`);
-  }
-});
-el.lobbyShareMore?.addEventListener("click", async () => {
-  try {
-    if (await shareLobbyInvitation()) {
-      setLobbyShareFeedback("System share panel opened with the room link.");
-      return;
-    }
-  } catch (error) {
-    if (error?.name === "AbortError") return;
-  }
-  try {
-    if (await copyLobbyInvitation()) {
-      setLobbyShareFeedback("Sharing is unavailable here, so the invitation was copied.");
-      return;
-    }
-  } catch {
-    /* Select the existing link as the final fallback. */
-  }
-  el.lobbyLink.select();
-  setLobbyShareFeedback("Copy the selected room link to share it.");
+  setLobbyQrFeedback("This browser cannot copy QR images. Use Copy link instead.");
 });
 el.lobbyStart.addEventListener("click", () => {
   if (!gameReady) { setLobbyStatus('Terrain is not ready. Please try again in a moment.', true); return; }
@@ -2842,8 +2732,13 @@ el.lobbyStart.addEventListener("click", () => {
 
 const joinId = parseRoomFromUrl();
 if (joinId) {
-  if (wasHosting(joinId)) openHostLobby(joinId);
-  else openGuestLobby(joinId);
+  // Joining calls cleanup paths that use multiplayer flight state declared
+  // later in this module. Queue it until the module has initialized fully so
+  // opening a copied/QR room URL cannot abort boot with a temporal-dead-zone error.
+  queueMicrotask(() => {
+    if (wasHosting(joinId)) openHostLobby(joinId);
+    else openGuestLobby(joinId);
+  });
 }
 
 // --- pauza (ESC) ---
