@@ -13,6 +13,8 @@ import { parseCoordinates, geocodeCity } from '../src/game/location.js';
 import {
   validMessage,
   escapeHtml,
+  canModeratePlayer,
+  hasRankStartQuorum,
   normalizePlayerName,
   normalizeChatMessage,
   PLAYER_NAME_MAX,
@@ -115,12 +117,37 @@ test('multiplayer rejects forged host commands, malformed poses and unsafe objec
   assert.equal(validMessage({t:'roster',players:[{id:'a',name:'x',plane:'pa28',role:'owner'}]}),false);
   assert.equal(validMessage({t:'bump',target:'peer-1',ix:20,iy:0,iz:0},true),false);
   assert.equal(validMessage({t:'bump',target:'x',ix:1,iy:0,iz:0},true),false);
+  assert.equal(validMessage({t:'moderate',action:'kick',target:'peer-1'},true),true);
+  assert.equal(validMessage({t:'moderate',action:'mute',target:'peer-1',muted:true},true),true);
+  assert.equal(validMessage({t:'moderate',action:'approve',target:'peer-1',approved:true},true),true);
+  assert.equal(validMessage({t:'moderate',action:'approve',target:'peer-1'},true),false);
+  assert.equal(validMessage({t:'moderate',action:'mute',target:'peer-1'},true),false);
+  assert.equal(validMessage({t:'muted',muted:true},true),false);
   assert.equal(escapeHtml('<img src=x>'), '&lt;img src=x&gt;');
 });
 test('legitimate guest messages pass validation', () => {
-  for (const message of [{t:'hello',name:'Pilot',plane:'pa28'},{t:'name',name:'Captain Beniamin'},{t:'chat',text:'Hello lobby'},{t:'ready',ready:true},{t:'talk',on:true},{t:'bump',target:'peer-1',ix:2,iy:0,iz:-1},{t:'snapped',h:420,gh:120,heading:0,probed:true},{t:'guess',lat:50,lon:10},{t:'rematch'},{t:'done'}]) assert.equal(validMessage(message,true),true, message.t);
+  for (const message of [{t:'hello',name:'Pilot',plane:'pa28'},{t:'name',name:'Captain Beniamin'},{t:'chat',text:'Hello lobby'},{t:'ready',ready:true},{t:'talk',on:true},{t:'moderate',action:'kick',target:'peer-1'},{t:'bump',target:'peer-1',ix:2,iy:0,iz:-1},{t:'snapped',h:420,gh:120,heading:0,probed:true},{t:'guess',lat:50,lon:10},{t:'rematch'},{t:'done'}]) assert.equal(validMessage(message,true),true, message.t);
   assert.equal(validMessage({t:'name',name:'x'.repeat(PLAYER_NAME_MAX + 1)},true),false);
   assert.equal(validMessage({t:'chat',text:'x'.repeat(CHAT_MESSAGE_MAX + 1)},true),false);
+});
+
+test('lobby moderation permissions follow admin, leader and player roles', () => {
+  assert.equal(canModeratePlayer('admin', 'leader'), true);
+  assert.equal(canModeratePlayer('admin', 'player'), true);
+  assert.equal(canModeratePlayer('leader', 'admin'), false);
+  assert.equal(canModeratePlayer('leader', 'leader'), true);
+  assert.equal(canModeratePlayer('leader', 'player'), true);
+  assert.equal(canModeratePlayer('player', 'player'), false);
+  assert.equal(canModeratePlayer('admin', 'player', true), false);
+});
+
+test('only admin and leaders form the multiplayer start quorum', () => {
+  const admin = {role:'admin',ready:true};
+  const leader = {role:'leader',ready:true};
+  const idlePlayer = {role:'player',ready:false};
+  assert.equal(hasRankStartQuorum([admin, leader, idlePlayer]), true);
+  assert.equal(hasRankStartQuorum([admin, {...leader,ready:false}, {...idlePlayer,ready:true}]), false);
+  assert.equal(hasRankStartQuorum([leader, idlePlayer]), false);
 });
 
 test('multiplayer nicknames are compact and safe to render', () => {

@@ -206,12 +206,28 @@ test('large multiplayer lobbies scroll and keep chat below the QR panel', async 
   await expect(page.locator('#lobby-qr-copy')).toHaveText('Copy QR');
   await expect(page.locator('[data-player-id="test-host"] .player-role-badge')).toHaveText('Admin');
   await expect(page.locator('[data-player-id="test-host"] .player-role-badge')).toHaveClass(/admin/);
+  await expect(page.locator('[data-player-id="test-host"] .player-moderation')).toHaveCount(0);
+  await expect(page.locator('[data-player-id="test-host"] .approval-toggle')).toBeChecked();
+  await expect(page.locator('[data-player-id="test-host"] .approval-toggle')).toBeDisabled();
+  await expect(page.locator('[data-player-id="test-player-1"] .mute-toggle')).toHaveText('Mute');
+  await expect(page.locator('[data-player-id="test-player-1"] .remove-player')).toHaveText('Remove');
+  await expect(page.locator('[data-player-id="test-player-1"] .approval-toggle')).not.toBeChecked();
+  await page.locator('[data-player-id="test-player-1"] .approval-toggle').click();
+  await expect(page.locator('[data-player-id="test-player-1"] .approval-toggle')).toBeChecked();
 
   for (let index = 1; index <= 3; index += 1) {
     await page.locator(`[data-player-id="test-player-${index}"] .leader-toggle`).click();
   }
   await expect(page.locator('.player-role-badge.leader')).toHaveCount(3);
+
+  await page.locator('[data-player-id="test-player-5"] .mute-toggle').click();
+  await expect(page.locator('[data-player-id="test-player-5"] .mute-toggle')).toHaveText('Unmute');
+  await expect(page.locator('[data-player-id="test-player-5"] .muted-badge')).toHaveText('Muted');
+  await page.locator('[data-player-id="test-player-5"] .mute-toggle').click();
+  await expect(page.locator('[data-player-id="test-player-5"] .muted-badge')).toHaveCount(0);
   await expect(page.locator('[data-player-id="test-player-1"] .player-role-badge')).toHaveText('Leader');
+  await expect(page.locator('[data-player-id="test-player-1"] .approval-toggle')).toBeChecked();
+  await expect(page.locator('[data-player-id="test-player-1"] .approval-toggle')).toBeDisabled();
   await expect(page.locator('[data-player-id="test-player-4"] .leader-toggle')).toBeDisabled();
 
   await page.locator('[data-player-id="test-player-1"] .leader-toggle').click();
@@ -230,6 +246,7 @@ test('large multiplayer lobbies scroll and keep chat below the QR panel', async 
   await page.locator('#lobby-chat-input').fill('<b>Hello all pilots</b>');
   await page.locator('#lobby-chat-form button').click();
   await expect(page.locator('.lobby-chat-message p')).toHaveText('<b>Hello all pilots</b>');
+  await expect(page.locator('.lobby-chat-author')).toHaveClass(/role-admin/);
   await expect(page.locator('#lobby-chat-messages b')).toHaveCount(0);
 
   const railLayout = await page.evaluate(() => {

@@ -877,6 +877,81 @@ kbd {
   cursor: not-allowed;
 }
 
+.player-moderation {
+  display: inline-flex;
+  gap: 6px;
+}
+
+.player-approval {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 28px;
+  padding: 5px 8px;
+  border: 1px solid rgba(243, 234, 214, 0.2);
+  border-radius: 6px;
+  color: var(--muted);
+  font: 700 10px/1.1 system-ui, sans-serif;
+  cursor: pointer;
+}
+
+.player-approval.approved {
+  border-color: rgba(94, 190, 116, 0.5);
+  background: rgba(94, 190, 116, 0.1);
+  color: #a8e8b7;
+}
+
+.player-approval input {
+  width: 15px;
+  height: 15px;
+  margin: 0;
+  accent-color: #5ebe74;
+  cursor: pointer;
+}
+
+.player-approval input:disabled { cursor: default; }
+.player-approval:has(input:disabled) { cursor: default; }
+.player-row.unapproved { border-color: rgba(243, 234, 214, 0.08); }
+
+.mute-toggle,
+.remove-player {
+  min-height: 28px;
+  padding: 5px 9px;
+  border: 1px solid rgba(243, 234, 214, 0.24);
+  border-radius: 6px;
+  background: rgba(243, 234, 214, 0.06);
+  color: var(--paper);
+  font: 700 10px/1.1 system-ui, sans-serif;
+  cursor: pointer;
+}
+
+.mute-toggle:hover,
+.mute-toggle:focus-visible,
+.mute-toggle.active {
+  border-color: #7ec8e3;
+  background: rgba(126, 200, 227, 0.16);
+}
+
+.remove-player {
+  border-color: rgba(224, 68, 62, 0.48);
+  color: #ffb0ac;
+}
+
+.remove-player:hover,
+.remove-player:focus-visible {
+  border-color: #e0443e;
+  background: rgba(224, 68, 62, 0.2);
+  color: #fff0ef;
+}
+
+.muted-badge {
+  margin-left: 7px;
+  color: #7ec8e3;
+  font: 800 10px/1 system-ui, sans-serif;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
 .player-row .p-plane {
   font-size: 12px;
   color: var(--muted);
@@ -1142,9 +1217,13 @@ kbd {
 .lobby-chat-author {
   display: block;
   margin-bottom: 3px;
-  color: var(--gold);
+  color: #7ec8e3;
   font: 700 11px/1.2 system-ui, sans-serif;
 }
+
+.lobby-chat-author.role-admin { color: var(--gold); }
+.lobby-chat-author.role-leader { color: #ff625d; }
+.lobby-chat-author.role-player { color: #7ec8e3; }
 
 .lobby-chat-message p {
   margin: 0;
@@ -1917,6 +1996,8 @@ kbd {
   .p-name-line { flex-wrap: wrap; }
   .player-name-form { flex-wrap: wrap; }
   .p-role-controls { width: 100%; margin-left: 0; }
+  .p-role-controls,
+  .player-moderation { flex-wrap: wrap; }
   .p-name-input { width: min(230px, calc(100vw - 170px)); }
   .you-label { display: none; }
 

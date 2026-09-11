@@ -5,6 +5,8 @@ import { geocodeCity, setupLocationPicker } from './game/location.js';
 import {
   validMessage,
   escapeHtml,
+  canModeratePlayer,
+  hasRankStartQuorum,
   normalizePlayerName,
   normalizeChatMessage,
   PLAYER_NAME_MAX,
@@ -533,6 +535,7 @@ const mp = {
   net: null,
   myName: "Host",
   myRole: "player",
+  myApproved: false,
   myReady: false,
   myScore: 0,
   waiting: false,
@@ -547,6 +550,8 @@ const mp = {
   goSent: false,
   waitingGo: false,
   truth: null,
+  roundStart: null,
+  goPayload: null,
   lastPoseAt: 0,
   poseSeq: 0,
   snapInfo: new Map(),
@@ -554,6 +559,7 @@ const mp = {
   launching: false,
   goAt: 0,
   talkers: new Set(),
+  myMuted: false,
   chat: [],
   bumpRelayAt: new Map(),
   contactAt: new Map(),
@@ -938,8 +944,8 @@ function otherPlayers() {
 
 function playablePlayers() {
   const list = [];
-  if (!mp.waiting) list.push({ id: mp.myId });
-  for (const p of mp.players.values()) if (!p.waiting) list.push(p);
+  if (!mp.waiting && mp.myApproved) list.push({ id: mp.myId });
+  for (const p of mp.players.values()) if (!p.waiting && p.approved) list.push(p);
   return list;
 }
 
@@ -986,8 +992,10 @@ function rosterPayload() {
       id: mp.myId,
       name: mp.myName,
       role: normalizedPlayerRole(mp.myRole, mp.host),
+      approved: mp.myApproved,
       plane: selectedPlane,
       ready: mp.myReady,
+      muted: mp.myMuted,
       score: mp.myScore,
       waiting: false,
       inRound: mp.inRound,
@@ -996,8 +1004,10 @@ function rosterPayload() {
       id: p.id,
       name: p.name,
       role: normalizedPlayerRole(p.role),
+      approved: !!p.approved,
       plane: p.plane,
       ready: p.ready,
+      muted: !!p.muted,
       score: p.score,
       waiting: !!p.waiting,
       inRound: !!p.inRound,
@@ -1011,6 +1021,8 @@ function applyRoster(list = []) {
     if (p.id === mp.myId) {
       mp.myName = normalizePlayerName(p.name, mp.myName);
       mp.myRole = normalizedPlayerRole(p.role, mp.host);
+      mp.myApproved = p.role === "admin" || p.role === "leader" || !!p.approved;
+      mp.myMuted = !!p.muted;
       mp.myScore = p.score ?? mp.myScore;
       mp.waiting = !!p.waiting;
       mp.inRound = !!p.inRound;
@@ -1047,6 +1059,13 @@ function chatPlayerName(id, fallback = "Pilot") {
   return normalizePlayerName(mp.players.get(id)?.name, fallback);
 }
 
+function chatPlayerRole(id, fallback = "player") {
+  if (id === mp.myId) return normalizedPlayerRole(mp.myRole, mp.host);
+  const player = mp.players.get(id);
+  if (player) return normalizedPlayerRole(player.role, id === mp.roomId);
+  return fallback === "admin" ? "admin" : normalizedPlayerRole(fallback);
+}
+
 function renderLobbyChat(forceBottom = false) {
   if (!el.lobbyChatMessages) return;
   el.lobbyChatInput.maxLength = CHAT_MESSAGE_MAX;
@@ -1065,7 +1084,7 @@ function renderLobbyChat(forceBottom = false) {
       const item = document.createElement("article");
       item.className = `lobby-chat-message${message.id === mp.myId ? " self" : ""}`;
       const author = document.createElement("strong");
-      author.className = "lobby-chat-author";
+      author.className = `lobby-chat-author role-${chatPlayerRole(message.id, message.role)}`;
       author.textContent = chatPlayerName(message.id, message.name);
       const body = document.createElement("p");
       body.textContent = message.text;
@@ -1079,13 +1098,14 @@ function renderLobbyChat(forceBottom = false) {
   if (forceBottom || wasAtBottom) el.lobbyChatMessages.scrollTop = el.lobbyChatMessages.scrollHeight;
 }
 
-function appendLobbyChat({ id, name, text }) {
+function appendLobbyChat({ id, name, role, text }) {
   const cleanText = normalizeChatMessage(text);
   if (!cleanText) return false;
   const cleanId = String(id || "");
   mp.chat.push({
     id: cleanId,
     name: chatPlayerName(cleanId, name),
+    role: chatPlayerRole(cleanId, role),
     text: cleanText,
   });
   if (mp.chat.length > LOBBY_CHAT_HISTORY_MAX) {
@@ -1098,8 +1118,8 @@ function appendLobbyChat({ id, name, text }) {
 function sendLobbyChat(value) {
   const text = normalizeChatMessage(value);
   if (!text || !mp.active || !mp.myId) return false;
-  appendLobbyChat({ id: mp.myId, name: mp.myName, text });
-  if (mp.host) mp.net?.send({ t: "chat", from: mp.myId, name: mp.myName, text });
+  appendLobbyChat({ id: mp.myId, name: mp.myName, role: mp.myRole, text });
+  if (mp.host) mp.net?.send({ t: "chat", from: mp.myId, name: mp.myName, role: "admin", text });
   else mp.net?.send({ t: "chat", text });
   return true;
 }
@@ -1111,8 +1131,10 @@ function renderLobby() {
       id: mp.myId,
       name: mp.myName,
       role: normalizedPlayerRole(mp.myRole, mp.host),
+      approved: mp.myApproved,
       plane: selectedPlane,
       ready: mp.myReady,
+      muted: mp.myMuted,
       score: mp.myScore,
       waiting: mp.waiting,
       inRound: mp.inRound && mp.roundActive,
@@ -1132,21 +1154,27 @@ function renderLobby() {
   updateLobbyQr(link);
   renderLobbyChat();
 
+  const canJoinRound = mp.roundActive && !mp.inRound && mp.myApproved;
   const queued = mp.waiting || (mp.roundActive && !mp.inRound);
-  el.lobbyStart.disabled = queued;
-  el.lobbyStart.textContent = queued
-    ? "Wait for next round"
-    : mp.myReady
-      ? "Cancel ready"
-      : "Start";
+  el.lobbyStart.disabled = queued && !canJoinRound;
+  el.lobbyStart.textContent = canJoinRound
+    ? "Join game"
+    : queued
+      ? "Wait for approval"
+      : mp.myReady
+        ? "Cancel ready"
+        : "Start";
 
   const playable = playablePlayers().length;
-  const readyN = (mp.myReady && !mp.waiting ? 1 : 0) + otherPlayers().filter((p) => !p.waiting && p.ready).length;
-  if (queued) setLobbyStatus("Round in progress – you will join the next one");
+  const required = rosterPayload().filter((player) => player.role === "admin" || player.role === "leader");
+  const requiredReady = required.filter((player) => player.ready).length;
+  if (!mp.myApproved) setLobbyStatus("Awaiting approval from an Admin or Leader");
+  else if (canJoinRound) setLobbyStatus("Round in progress – you can join now");
+  else if (queued) setLobbyStatus("Round in progress – awaiting approval");
   else if (playable < 2) setLobbyStatus("Send the link to friends – everyone in the room must press Start");
-  else if (mp.myReady && readyN === playable) setLobbyStatus("Starting…");
-  else if (mp.myReady) setLobbyStatus(`Waiting for everyone to press Start (${readyN}/${playable})`);
-  else setLobbyStatus(`Everyone press Start (${playable} players)`);
+  else if (hasRankStartQuorum(required)) setLobbyStatus("Starting…");
+  else if (mp.myReady) setLobbyStatus(`Waiting for Admin and Leaders (${requiredReady}/${required.length})`);
+  else setLobbyStatus(`Admin and all Leaders must press Start (${requiredReady}/${required.length})`);
 }
 
 function roleBadge(role) {
@@ -1181,7 +1209,16 @@ function playerRow(p, isSelf, leaderCount = 0) {
   const leaderToggle = mp.host && !isSelf
     ? `<button class="leader-toggle${role === "leader" ? " active" : ""}" type="button" data-player-id="${playerId}" aria-pressed="${role === "leader"}" ${leaderLimitReached ? 'disabled title="Maximum 3 leaders"' : ""}>${role === "leader" ? "Remove leader" : "Make leader"}</button>`
     : "";
-  return `<div class="player-row${cls}" data-player-id="${playerId}"><div class="p-meta"><div class="p-name-line">${name}<span class="p-role-controls">${roleBadge(role)}${leaderToggle}</span></div><span class="p-plane">${escapeHtml(plane)}${escapeHtml(pts)}</span></div><span class="p-ready">${badge}</span></div>`;
+  const canModerate = canModeratePlayer(normalizedPlayerRole(mp.myRole, mp.host), role, isSelf);
+  const moderation = canModerate
+    ? `<span class="player-moderation"><button class="mute-toggle${p.muted ? " active" : ""}" type="button" data-player-id="${playerId}" aria-pressed="${!!p.muted}" aria-label="${p.muted ? "Unmute" : "Mute"} ${escapeHtml(p.name)}">${p.muted ? "Unmute" : "Mute"}</button><button class="remove-player" type="button" data-player-id="${playerId}" aria-label="Remove ${escapeHtml(p.name)} from lobby">Remove</button></span>`
+    : "";
+  const mutedBadge = p.muted ? '<span class="muted-badge" title="Microphone muted">Muted</span>' : "";
+  const automaticallyApproved = role === "admin" || role === "leader";
+  const canChangeApproval = canModerate && role === "player";
+  const approved = automaticallyApproved || !!p.approved;
+  const approval = `<label class="player-approval${approved ? " approved" : ""}" title="${approved ? "Approved for the game" : "Awaiting approval"}"><input class="approval-toggle" type="checkbox" data-player-id="${playerId}" ${approved ? "checked" : ""} ${canChangeApproval ? "" : "disabled"}><span>Approved</span></label>`;
+  return `<div class="player-row${cls}${p.muted ? " muted" : ""}${approved ? " approved" : " unapproved"}" data-player-id="${playerId}"><div class="p-meta"><div class="p-name-line">${name}<span class="p-role-controls">${roleBadge(role)}${leaderToggle}${approval}${moderation}</span></div><span class="p-plane">${escapeHtml(plane)}${escapeHtml(pts)}${mutedBadge}</span></div><span class="p-ready">${badge}</span></div>`;
 }
 
 function renamePlayer(playerId, value) {
@@ -1211,6 +1248,7 @@ function toggleLobbyLeader(playerId) {
     return;
   }
   player.role = isLeader ? "player" : "leader";
+  if (!isLeader) player.approved = true;
   applyMultiplayerRoleColors();
   broadcastRoster();
   renderLobby();
@@ -1218,6 +1256,54 @@ function toggleLobbyLeader(playerId) {
   setLobbyStatus(isLeader
     ? `${player.name} is now a player (${nextCount}/${MAX_LOBBY_LEADERS} leaders)`
     : `${player.name} is now a leader (${nextCount}/${MAX_LOBBY_LEADERS})`);
+}
+
+function applyLobbyModeration(actorId, action, targetId, value = false) {
+  if (!mp.host || !actorId || !targetId || actorId === targetId) return false;
+  const actorRole = actorId === mp.myId ? normalizedPlayerRole(mp.myRole, true) : normalizedPlayerRole(mp.players.get(actorId)?.role);
+  const target = mp.players.get(targetId);
+  if (!target || !canModeratePlayer(actorRole, normalizedPlayerRole(target.role))) return false;
+  const actorName = actorId === mp.myId ? mp.myName : chatPlayerName(actorId);
+  if (action === "approve") {
+    if (normalizedPlayerRole(target.role) !== "player") return false;
+    target.approved = !!value;
+    if (!target.approved) target.ready = false;
+    broadcastRoster();
+    renderLobby();
+    if (actorId === mp.myId) setLobbyStatus(`${target.name} ${target.approved ? "approved" : "is awaiting approval"}`);
+    tryStartMp();
+    return true;
+  }
+  if (action === "mute") {
+    target.muted = !!value;
+    if (target.muted) {
+      mp.talkers.delete(targetId);
+      mp.net?.send({ t: "talk", from: targetId, on: false });
+    }
+    mp.net?.sendTo(targetId, { t: "muted", muted: target.muted, name: actorName });
+    broadcastRoster();
+    renderLobby();
+    if (actorId === mp.myId) setLobbyStatus(`${target.name} ${target.muted ? "muted" : "unmuted"}`);
+    return true;
+  }
+  if (action !== "kick") return false;
+  mp.net?.sendTo(targetId, { t: "removed", name: actorName });
+  if (actorId === mp.myId) setLobbyStatus(`${target.name} removed from the lobby`);
+  const room = mp.net;
+  setTimeout(() => {
+    if (mp.net === room) room?.disconnect?.(targetId);
+  }, 180);
+  return true;
+}
+
+function requestLobbyModeration(playerId, action) {
+  if (!playerId || playerId === mp.myId) return;
+  const target = mp.players.get(playerId);
+  const actorRole = normalizedPlayerRole(mp.myRole, mp.host);
+  if (!target || !canModeratePlayer(actorRole, normalizedPlayerRole(target.role))) return;
+  const value = action === "mute" ? !target.muted : action === "approve" ? !target.approved : undefined;
+  if (mp.host) applyLobbyModeration(mp.myId, action, playerId, value);
+  else mp.net?.send({ t: "moderate", action, target: playerId, ...(action === "mute" ? { muted: value } : action === "approve" ? { approved: value } : {}) });
 }
 
 function applyLobbySetup() {
@@ -1265,6 +1351,11 @@ let wantTalk = false;
 
 async function startTalk() {
   if (!mp.active) return;
+  if (mp.myMuted) {
+    wantTalk = false;
+    updateVoiceUi();
+    return;
+  }
   wantTalk = true;
   if (isTalking()) return;
   unlockAudio();
@@ -1298,16 +1389,23 @@ function updateVoiceUi() {
   }
   const localTalking = isTalking();
   const who = [...mp.talkers].map((id) => playerName(id)).filter(Boolean);
-  const hideMobileIdle = isMobile && !localTalking && !who.length && !voiceDenied();
+  const hideMobileIdle = isMobile && !localTalking && !who.length && !voiceDenied() && !mp.myMuted;
   box.classList.toggle("hidden", hideMobileIdle);
   box.classList.toggle("live", localTalking);
-  if (el.touchTalk) el.touchTalk.setAttribute("aria-pressed", String(localTalking));
+  if (el.touchTalk) {
+    el.touchTalk.setAttribute("aria-pressed", String(localTalking));
+    el.touchTalk.disabled = mp.myMuted;
+  }
   if (hideMobileIdle) {
     box.textContent = "";
     return;
   }
   if (voiceDenied()) {
     box.textContent = "Microphone blocked – allow access in the browser";
+    return;
+  }
+  if (mp.myMuted) {
+    box.textContent = "Microphone muted by moderator";
     return;
   }
   if (localTalking) {
@@ -1329,9 +1427,13 @@ async function handleVoiceCall(call) {
 function handleNetData(data, fromId) {
   if (!validMessage(data, mp.host && !!fromId)) return;
   if (mp.host && fromId && data.t !== "hello" && !mp.players.has(fromId)) return;
+  if (mp.host && fromId && data.t === "talk" && data.on && mp.players.get(fromId)?.muted) {
+    mp.net?.sendTo(fromId, { t: "muted", muted: true, name: "Admin" });
+    return;
+  }
   if (mp.host && fromId) {
     data = { ...data, from: fromId };
-    if (!["hello", "name", "chat", "bump"].includes(data.t)) mp.net.sendExcept(fromId, data);
+    if (!["hello", "name", "chat", "moderate", "bump"].includes(data.t)) mp.net.sendExcept(fromId, data);
   }
 
   if (data.t === "hello") {
@@ -1342,8 +1444,10 @@ function handleNetData(data, fromId) {
       id: fromId,
       name,
       role: "player",
+      approved: false,
       plane: data.plane || "pa28",
       ready: false,
+      muted: false,
       score: 0,
       waiting,
       inRound: false,
@@ -1364,6 +1468,7 @@ function handleNetData(data, fromId) {
         t: "chat",
         from: message.id,
         name: chatPlayerName(message.id, message.name),
+        role: chatPlayerRole(message.id, message.role),
         text: message.text,
       });
     }
@@ -1422,17 +1527,40 @@ function handleNetData(data, fromId) {
       const id = data.from;
       const sender = id ? mp.players.get(id) : null;
       if (!id || !sender) return;
-      const message = { t: "chat", from: id, name: sender.name, text };
-      appendLobbyChat({ id, name: sender.name, text });
+      const role = normalizedPlayerRole(sender.role);
+      const message = { t: "chat", from: id, name: sender.name, role, text };
+      appendLobbyChat({ id, name: sender.name, role, text });
       mp.net?.sendExcept(id, message);
     } else {
       const id = String(data.from || "");
       if (!id || id === mp.myId) return;
-      appendLobbyChat({ id, name: data.name, text });
+      appendLobbyChat({ id, name: data.name, role: data.role, text });
+    }
+  } else if (data.t === "moderate") {
+    if (!mp.host || !data.from) return;
+    applyLobbyModeration(data.from, data.action, data.target, data.action === "approve" ? data.approved : data.muted);
+  } else if (data.t === "muted") {
+    if (mp.host) return;
+    mp.myMuted = !!data.muted;
+    if (mp.myMuted) stopTalk();
+    renderLobby();
+    updateVoiceUi();
+    setLobbyStatus(`Your microphone was ${mp.myMuted ? "muted" : "unmuted"} by ${normalizePlayerName(data.name, "a moderator")}`, mp.myMuted);
+  } else if (data.t === "removed") {
+    if (mp.host) return;
+    const by = normalizePlayerName(data.name, "a moderator");
+    showLanding();
+    if (el.crashNote) {
+      el.crashNote.hidden = false;
+      el.crashNote.textContent = `You were removed from the lobby by ${by}.`;
     }
   } else if (data.t === "ready") {
     const id = data.from;
     if (id && mp.players.has(id)) mp.players.get(id).ready = !!data.ready;
+    if (mp.host && mp.roundActive && data.ready && id) {
+      joinRoundInProgress(id);
+      return;
+    }
     renderLobby();
     tryStartMp();
   } else if (data.t === "talk") {
@@ -1453,7 +1581,11 @@ function handleNetData(data, fromId) {
       });
       mp.snapped.add(data.from);
     }
-    if (mp.host) tryReleaseGo();
+    if (mp.host && mp.goSent && mp.goPayload && data.from) {
+      mp.net?.sendTo(data.from, { t: "go", ...mp.goPayload });
+    } else if (mp.host) {
+      tryReleaseGo();
+    }
   } else if (data.t === "go") {
     applyGo(data);
   } else if (data.t === "rematch") {
@@ -1559,6 +1691,8 @@ function closeRoom() {
   mp.myId = "";
   mp.host = false;
   mp.myRole = "player";
+  mp.myApproved = false;
+  mp.myMuted = false;
   mp.myReady = false;
   mp.myScore = 0;
   mp.waiting = false;
@@ -1571,6 +1705,8 @@ function closeRoom() {
   mp.guesses.clear();
   mp.poses.clear();
   mp.seats = {};
+  mp.roundStart = null;
+  mp.goPayload = null;
   mp.snapInfo.clear();
   mp.rematch.clear();
   mp.launching = false;
@@ -1592,6 +1728,7 @@ function openHostLobby(existingId) {
   mp.active = true;
   mp.host = true;
   mp.myRole = "admin";
+  mp.myApproved = true;
   mp.myName = "Host";
   applyMultiplayerRoleColors();
   if (existingId) mp.roomId = existingId;
@@ -1621,6 +1758,7 @@ function openGuestLobby(id) {
   mp.active = true;
   mp.host = false;
   mp.myRole = "player";
+  mp.myApproved = false;
   mp.myName = randomUsername();
   applyMultiplayerRoleColors();
   mp.roomId = id;
@@ -1647,9 +1785,24 @@ function openGuestLobby(id) {
 
 function tryStartMp() {
   if (!mp.host || !mp.myReady || mp.roundActive) return;
-  const others = otherPlayers().filter((p) => !p.waiting);
-  if (!others.length || others.some((p) => !p.ready)) return;
+  if (!hasRankStartQuorum(rosterPayload())) return;
   launchMpRound();
+}
+
+function joinRoundInProgress(playerId) {
+  if (!mp.host || !mp.roundActive || !mp.roundStart || !playerId) return false;
+  const player = mp.players.get(playerId);
+  if (!player?.approved || player.inRound) return false;
+  const occupied = Object.values(mp.seats).filter(Number.isFinite);
+  const seat = occupied.length ? Math.max(...occupied) + 1 : 0;
+  mp.seats[playerId] = seat;
+  player.ready = false;
+  player.waiting = false;
+  player.inRound = true;
+  mp.net?.sendTo(playerId, { ...mp.roundStart, seats: { ...mp.seats } });
+  broadcastRoster();
+  renderLobby();
+  return true;
 }
 
 async function launchMpRound() {
@@ -1723,7 +1876,7 @@ function buildSeats() {
   let i = 0;
   seats[mp.myId] = i++;
   for (const p of otherPlayers()) {
-    if (!p.waiting) seats[p.id] = i++;
+    if (p.approved && !p.waiting && (p.role === "leader" || p.ready)) seats[p.id] = i++;
   }
   return seats;
 }
@@ -1817,10 +1970,13 @@ function markRoundStarted(seats) {
   for (const p of mp.players.values()) {
     p.ready = false;
     p.inRound = !!(seats && seats[p.id] != null);
+    p.waiting = !p.inRound;
   }
 }
 
 async function startMpFlight(msg) {
+  const { seats: _initialSeats, ...roundStart } = msg;
+  mp.roundStart = roundStart;
   mode = "free";
   guessScope = msg.scope || guessScope;
   mp.active = true;
@@ -1928,6 +2084,7 @@ function applyGo(msg) {
     ? { h: msg.h, gh: msg.gh, heading: msg.heading ?? 0 }
     : buildGoPayload();
   if (!payload) return;
+  mp.goPayload = payload;
   mp.goSent = true;
   mp.waitingGo = false;
   if (mp.host) mp.net?.send({ t: "go", ...payload });
@@ -1978,6 +2135,8 @@ function finishRoomRound() {
   mp.inRound = false;
   mp.waiting = false;
   mp.myReady = false;
+  mp.roundStart = null;
+  mp.goPayload = null;
   for (const p of mp.players.values()) {
     p.waiting = false;
     p.inRound = false;
@@ -2679,9 +2838,23 @@ el.lobbyPlayers.addEventListener("submit", (event) => {
   renamePlayer(form.dataset.playerId, form.elements.nickname?.value);
 });
 el.lobbyPlayers.addEventListener("click", (event) => {
-  const button = event.target.closest(".leader-toggle");
-  if (!button) return;
-  toggleLobbyLeader(button.dataset.playerId);
+  const leaderButton = event.target.closest(".leader-toggle");
+  if (leaderButton) {
+    toggleLobbyLeader(leaderButton.dataset.playerId);
+    return;
+  }
+  const muteButton = event.target.closest(".mute-toggle");
+  if (muteButton) {
+    requestLobbyModeration(muteButton.dataset.playerId, "mute");
+    return;
+  }
+  const removeButton = event.target.closest(".remove-player");
+  if (removeButton) {
+    requestLobbyModeration(removeButton.dataset.playerId, "kick");
+    return;
+  }
+  const approval = event.target.closest(".approval-toggle");
+  if (approval) requestLobbyModeration(approval.dataset.playerId, "approve");
 });
 el.lobbyChatForm?.addEventListener("submit", (event) => {
   event.preventDefault();
@@ -2716,8 +2889,23 @@ el.lobbyQrCopy?.addEventListener("click", async () => {
 el.lobbyStart.addEventListener("click", () => {
   if (!gameReady) { setLobbyStatus('Terrain is not ready. Please try again in a moment.', true); return; }
   unlockAudio();
+  if (mp.roundActive && !mp.inRound) {
+    if (!mp.myApproved) {
+      setLobbyStatus("Awaiting approval from an Admin or Leader", true);
+      return;
+    }
+    mp.myReady = true;
+    mp.net?.send({ t: "ready", ready: true, from: mp.myId });
+    el.lobbyStart.disabled = true;
+    setLobbyStatus("Joining the current game…");
+    return;
+  }
   if (mp.waiting || (mp.roundActive && !mp.inRound)) {
     setLobbyStatus("Round in progress – you will join the next one");
+    return;
+  }
+  if (!mp.myApproved) {
+    setLobbyStatus("Awaiting approval from an Admin or Leader", true);
     return;
   }
   if (playablePlayers().length < 2) {
@@ -5176,12 +5364,14 @@ window.__testPopulateLobby = (count = 40) => {
     send() {},
     sendTo() {},
     sendExcept() {},
+    disconnect(peerId) { handlePeerLeft(peerId); return true; },
     call() { return null; },
     destroy() {},
   };
   mp.active = true;
   mp.host = true;
   mp.myRole = "admin";
+  mp.myApproved = true;
   mp.myId = "test-host";
   mp.roomId = "test-host";
   mp.myName = "Host";
@@ -5193,6 +5383,8 @@ window.__testPopulateLobby = (count = 40) => {
       id,
       name: `Pilot ${index}`,
       role: "player",
+      approved: false,
+      muted: false,
       plane: "pa28",
       ready: false,
       score: 0,

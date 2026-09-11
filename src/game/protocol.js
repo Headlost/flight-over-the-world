@@ -1,5 +1,5 @@
-const TYPES = new Set(['hello','welcome','roster','scope','mode','city','plane','name','chat','ready','talk','bump','snapped','go','rematch','start','pose','guess','done','roundEnd']);
-const GUEST_TYPES = new Set(['hello','plane','name','chat','ready','talk','bump','snapped','rematch','pose','guess','done']);
+const TYPES = new Set(['hello','welcome','roster','scope','mode','city','plane','name','chat','ready','talk','moderate','muted','removed','bump','snapped','go','rematch','start','pose','guess','done','roundEnd']);
+const GUEST_TYPES = new Set(['hello','plane','name','chat','ready','talk','moderate','bump','snapped','rematch','pose','guess','done']);
 const PLANES = new Set(['pa28','q400','citation','jet','rocket','parachutist']);
 const PLAYER_ROLES = new Set(['admin','leader','player']);
 const finite = (n, low, high) => typeof n === 'number' && Number.isFinite(n) && n >= low && n <= high;
@@ -22,6 +22,17 @@ export function normalizeChatMessage(value) {
     .replace(/\s+/g, ' ')
     .trim()
     .slice(0, CHAT_MESSAGE_MAX);
+}
+
+export function canModeratePlayer(actorRole, targetRole, isSelf = false) {
+  if (isSelf) return false;
+  if (actorRole === 'admin') return true;
+  return actorRole === 'leader' && targetRole !== 'admin';
+}
+
+export function hasRankStartQuorum(players = []) {
+  const required = players.filter(player => player?.role === 'admin' || player?.role === 'leader');
+  return required.some(player => player.role === 'admin') && required.every(player => player.ready === true);
 }
 
 export function validMessage(data, fromGuest = false) {
@@ -52,9 +63,11 @@ export function validMessage(data, fromGuest = false) {
   }
   if (data.t === 'pose' && (!finite(data.pitch,-Math.PI,Math.PI) || !finite(data.roll,-Math.PI,Math.PI) || !finite(data.seq,0,Number.MAX_SAFE_INTEGER) || !finite(data.at,0,Number.MAX_SAFE_INTEGER))) return false;
   if (data.t === 'bump' && (typeof data.target !== 'string' || data.target.length < 3 || data.target.length > 80 || !finite(data.ix,-8,8) || !finite(data.iy,-8,8) || !finite(data.iz,-8,8))) return false;
+  if (data.t === 'moderate' && (!['mute','kick','approve'].includes(data.action) || typeof data.target !== 'string' || data.target.length < 3 || data.target.length > 80 || (data.action === 'mute' && typeof data.muted !== 'boolean') || (data.action === 'approve' && typeof data.approved !== 'boolean'))) return false;
+  if (data.t === 'muted' && typeof data.muted !== 'boolean') return false;
   if (data.state != null && !['airborne','grounded','launching'].includes(data.state)) return false;
   if (data.motion != null && !finite(data.motion,0,1000)) return false;
-  for (const key of ['roster','players']) if (data[key] != null && (!Array.isArray(data[key]) || !data[key].every(p => p && typeof p.id === 'string' && typeof p.name === 'string' && p.name.length <= PLAYER_NAME_MAX && PLANES.has(p.plane) && (p.role == null || PLAYER_ROLES.has(p.role)) && (p.score == null || finite(p.score,0,1e9))))) return false;
+  for (const key of ['roster','players']) if (data[key] != null && (!Array.isArray(data[key]) || !data[key].every(p => p && typeof p.id === 'string' && typeof p.name === 'string' && p.name.length <= PLAYER_NAME_MAX && PLANES.has(p.plane) && (p.role == null || PLAYER_ROLES.has(p.role)) && (p.muted == null || typeof p.muted === 'boolean') && (p.approved == null || typeof p.approved === 'boolean') && (p.score == null || finite(p.score,0,1e9))))) return false;
   if (data.seats != null && (typeof data.seats !== 'object' || Array.isArray(data.seats) || !Object.values(data.seats).every(n => Number.isSafeInteger(n) && n >= 0))) return false;
   return true;
 }

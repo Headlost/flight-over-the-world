@@ -111,6 +111,12 @@ export function hostRoom(handlers, existingId) {
     sendExcept(peerId, data) {
       each((c) => c.send(data), peerId);
     },
+    disconnect(peerId) {
+      const c = conns.get(peerId);
+      if (!c) return false;
+      c.close();
+      return true;
+    },
     call(peerId, stream) {
       if (!peerId || !stream) return null;
       try {
@@ -228,6 +234,7 @@ export function joinRoom(hostId, handlers) {
     },
     sendTo() {},
     sendExcept() {},
+    disconnect() { return false; },
     call(peerId, stream) {
       if (!peerId || !stream) return null;
       try {
