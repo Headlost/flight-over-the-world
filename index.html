@@ -74,8 +74,31 @@
           <input id="lobby-link" type="text" readonly />
           <button id="lobby-copy" type="button">Copy link</button>
         </div>
+        <aside class="lobby-share-rail" aria-label="Room sharing and lobby chat">
+          <section id="lobby-qr" class="lobby-qr" aria-label="QR code for joining this room" hidden>
+            <canvas id="lobby-qr-canvas" role="img" aria-label="Scan this QR code to join the multiplayer room"></canvas>
+            <div class="lobby-qr-info">
+              <strong>Scan to join</strong>
+              <span>Open the room instantly on another device.</span>
+              <span id="lobby-qr-feedback" class="lobby-qr-feedback" role="status" aria-live="polite"></span>
+              <div class="lobby-qr-actions">
+                <button id="lobby-qr-copy" type="button">Copy QR</button>
+                <button id="lobby-qr-share" type="button">Share QR</button>
+              </div>
+            </div>
+          </section>
+          <section id="lobby-chat" class="lobby-chat" aria-label="Lobby chat">
+            <div class="lobby-chat-head"><strong>Lobby chat</strong><span id="lobby-chat-count">0 players</span></div>
+            <div id="lobby-chat-messages" class="lobby-chat-messages" role="log" aria-live="polite" aria-relevant="additions"></div>
+            <form id="lobby-chat-form" class="lobby-chat-form">
+              <label class="sr-only" for="lobby-chat-input">Message to players in the lobby</label>
+              <input id="lobby-chat-input" name="message" type="text" maxlength="280" placeholder="Write a message…" autocomplete="off" />
+              <button type="submit">Send</button>
+            </form>
+          </section>
+        </aside>
         <p id="lobby-status"></p>
-        <p class="hint">Hold <kbd>T</kbd> to talk – the other player will hear you</p>
+        <p class="hint lobby-voice-hint">Hold <kbd>T</kbd> to talk – the other player will hear you</p>
         <button id="lobby-start" type="button">Start</button>
       </div>
     </div>

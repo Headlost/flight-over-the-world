@@ -1,15 +1,30 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { PlaneController } from '../src/game/plane.js';
-import { createParachutistModel, parachutistDescentScale, ParachutistController, updateParachutistModel } from '../src/game/paraglider.js';
+import {
+  createParachutistModel,
+  parachutistDescentScale,
+  PARACHUTIST_ROLE_COLORS,
+  ParachutistController,
+  setParachutistRole,
+  updateParachutistModel,
+} from '../src/game/paraglider.js';
 import { parseCoordinates, geocodeCity } from '../src/game/location.js';
-import { validMessage, escapeHtml } from '../src/game/protocol.js';
+import {
+  validMessage,
+  escapeHtml,
+  normalizePlayerName,
+  normalizeChatMessage,
+  PLAYER_NAME_MAX,
+  CHAT_MESSAGE_MAX,
+} from '../src/game/protocol.js';
 import { renderRatio, AdaptiveQuality, terrainStreamProfile } from '../src/game/quality.js';
 import { attributionSignature } from '../src/game/attribution.js';
 import { disposeModel } from '../src/game/dispose.js';
 import { streetViewUrl } from '../src/game/streetview.js';
 import { SpaceFlightController } from '../src/game/space.js';
 import { ContactConfirmation, parachutistCameraClimbAssist, raycastVisibleTerrain, rocketLaunchCameraPhase, updateChaseOffset } from '../src/game/flightSafety.js';
+import { classifyPlayerContact, clampBumpVector, MAX_PLAYER_BUMP, PLAYER_STACK_HEIGHT } from '../src/game/playerInteraction.js';
 import { Box3, Group, Mesh, BoxGeometry, MeshBasicMaterial, Quaternion, Raycaster, Texture, Vector3 } from 'three';
 
 test('coordinates bypass network and geographic bounds are validated', async () => {
@@ -95,10 +110,85 @@ test('multiplayer rejects forged host commands, malformed poses and unsafe objec
   assert.equal(validMessage(JSON.parse('{"t":"hello","__proto__":{}}')),false);
   assert.equal(validMessage({t:'hello',name:'a'.repeat(501)}),false);
   assert.equal(validMessage({t:'roster',players:[{id:'a',name:'x',plane:'nope'}]}),false);
+  assert.equal(validMessage({t:'hello',name:'Pilot',plane:'pa28',role:'admin'},true),false);
+  assert.equal(validMessage({t:'roster',players:[{id:'a',name:'x',plane:'pa28',role:'owner'}]}),false);
+  assert.equal(validMessage({t:'bump',target:'peer-1',ix:20,iy:0,iz:0},true),false);
+  assert.equal(validMessage({t:'bump',target:'x',ix:1,iy:0,iz:0},true),false);
   assert.equal(escapeHtml('<img src=x>'), '&lt;img src=x&gt;');
 });
 test('legitimate guest messages pass validation', () => {
-  for (const message of [{t:'hello',name:'Pilot',plane:'pa28'},{t:'ready',ready:true},{t:'talk',on:true},{t:'snapped',h:420,gh:120,heading:0,probed:true},{t:'guess',lat:50,lon:10},{t:'rematch'},{t:'done'}]) assert.equal(validMessage(message,true),true, message.t);
+  for (const message of [{t:'hello',name:'Pilot',plane:'pa28'},{t:'name',name:'Captain Beniamin'},{t:'chat',text:'Hello lobby'},{t:'ready',ready:true},{t:'talk',on:true},{t:'bump',target:'peer-1',ix:2,iy:0,iz:-1},{t:'snapped',h:420,gh:120,heading:0,probed:true},{t:'guess',lat:50,lon:10},{t:'rematch'},{t:'done'}]) assert.equal(validMessage(message,true),true, message.t);
+  assert.equal(validMessage({t:'name',name:'x'.repeat(PLAYER_NAME_MAX + 1)},true),false);
+  assert.equal(validMessage({t:'chat',text:'x'.repeat(CHAT_MESSAGE_MAX + 1)},true),false);
+});
+
+test('multiplayer nicknames are compact and safe to render', () => {
+  assert.equal(normalizePlayerName('  Captain\n\tBeniamin  '), 'Captain Beniamin');
+  assert.equal(normalizePlayerName('', 'Guest Pilot'), 'Guest Pilot');
+  assert.equal(normalizePlayerName('x'.repeat(100)).length, PLAYER_NAME_MAX);
+});
+
+test('lobby chat is compact and strips control characters', () => {
+  assert.equal(normalizeChatMessage('  Hello\n\tall pilots  '), 'Hello all pilots');
+  assert.equal(normalizeChatMessage('x'.repeat(500)).length, CHAT_MESSAGE_MAX);
+  assert.equal(normalizeChatMessage('\u0000\t'), '');
+});
+
+test('multiplayer rosters and seat maps have no fixed player-count cap', () => {
+  const players = Array.from({length:40}, (_, index) => ({
+    id:`player-${index}`,
+    name:`Pilot ${index}`,
+    plane:'pa28',
+    role:index === 0 ? 'admin' : index < 4 ? 'leader' : 'player',
+    score:0,
+  }));
+  const seats = Object.fromEntries(players.map((player, index) => [player.id, index]));
+  assert.equal(validMessage({t:'roster',players}), true);
+  assert.equal(validMessage({t:'start',mode:'free',lat:52,lon:16,seats}), true);
+});
+
+test('multiplayer roles tint the parachutist body gold or red and restore defaults', () => {
+  const model = createParachutistModel();
+  const surfaces = model.userData.parachutist.character.roleSurfaces;
+  const defaults = surfaces.map(entry => entry.color);
+  assert.equal(setParachutistRole(model, 'admin'), PARACHUTIST_ROLE_COLORS.admin);
+  assert.ok(surfaces.every(entry => entry.surface.color.getHex() === PARACHUTIST_ROLE_COLORS.admin));
+  assert.equal(setParachutistRole(model, 'leader'), PARACHUTIST_ROLE_COLORS.leader);
+  assert.ok(surfaces.every(entry => entry.surface.color.getHex() === PARACHUTIST_ROLE_COLORS.leader));
+  assert.equal(setParachutistRole(model, 'player'), null);
+  assert.deepEqual(surfaces.map(entry => entry.surface.color.getHex()), defaults);
+  disposeModel(model);
+});
+
+test('multiplayer contacts push gently, never exceed the impulse cap and allow player stacks', () => {
+  const wingTouch = classifyPlayerContact({
+    localKey:'pa28', localState:'airborne', localWingspan:11,
+    remoteKey:'pa28', remoteState:'airborne', remoteWingspan:11,
+    horizontalDistance:7, verticalDelta:0, localMotion:48, remoteMotion:48,
+  });
+  assert.equal(wingTouch.type, 'push');
+  assert.ok(wingTouch.strength > 0 && wingTouch.strength <= MAX_PLAYER_BUMP);
+  assert.equal(classifyPlayerContact({
+    localKey:'pa28', localState:'airborne', localWingspan:11,
+    remoteKey:'pa28', remoteState:'airborne', remoteWingspan:11,
+    horizontalDistance:30, verticalDelta:0,
+  }), null);
+
+  const walkingPush = classifyPlayerContact({
+    localKey:'parachutist', localState:'grounded', localWingspan:9.2,
+    remoteKey:'parachutist', remoteState:'grounded', remoteWingspan:9.2,
+    horizontalDistance:0.7, verticalDelta:0, localMotion:2.5, remoteMotion:0,
+  });
+  assert.deepEqual({type:walkingPush.type, walking:walkingPush.walking}, {type:'push', walking:true});
+
+  const stack = classifyPlayerContact({
+    localKey:'parachutist', localState:'airborne', localWingspan:9.2,
+    remoteKey:'parachutist', remoteState:'grounded', remoteWingspan:9.2,
+    horizontalDistance:0.25, verticalDelta:PLAYER_STACK_HEIGHT,
+  });
+  assert.deepEqual(stack, {type:'support', supportOffset:PLAYER_STACK_HEIGHT});
+  const limited = clampBumpVector(20, 0, 0);
+  assert.ok(Math.hypot(limited.x, limited.y, limited.z) <= MAX_PLAYER_BUMP);
 });
 function simulate(hz, lat=52, lon=16, heading=90, input={roll:0.4,pitch:0.1,throttle:0}) {
   const plane = new PlaneController(lat,lon,500,heading);

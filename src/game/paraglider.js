@@ -16,12 +16,17 @@ const R_EARTH = 6378137;
 // A brisk, predictable walking pace. Keeping it constant makes precise movement
 // on roofs and narrow streets easier than switching between walk and run.
 const WALK_SPEED = 2.5;
-const GROUND_CLEARANCE = 0.32;
+export const PARACHUTIST_GROUND_CLEARANCE = 0.32;
+const GROUND_CLEARANCE = PARACHUTIST_GROUND_CLEARANCE;
 const GENTLE_LAUNCH_HEIGHT = 12;
 const ROCKET_LAUNCH_HEIGHT = 80;
 const GENTLE_CLIMB_SPEED = 1.7;
 const NORMAL_DESCENT_BELOW = 60;
 const FAST_DESCENT_ABOVE = 120;
+export const PARACHUTIST_ROLE_COLORS = Object.freeze({
+  admin: 0xd8a24a,
+  leader: 0xd83b36,
+});
 
 export function parachutistDescentScale(groundClearance) {
   if (!Number.isFinite(groundClearance)) return 1.5;
@@ -156,7 +161,13 @@ function createPilot() {
     const boot = part(new BoxGeometry(0.18, 0.15, 0.35), boots, lower, [0, -0.55, -0.08]);
     legs.push({ upper, lower, boot, side });
   }
-  return { pilot, body, arms, legs, phase: 0 };
+  const roleSurfaces = [jacket, trousers, harness, helmet].map(surface => ({
+    surface,
+    color: surface.color.getHex(),
+    emissive: surface.emissive.getHex(),
+    emissiveIntensity: surface.emissiveIntensity,
+  }));
+  return { pilot, body, arms, legs, roleSurfaces, phase: 0 };
 }
 
 export function createParachutistModel() {
@@ -168,6 +179,26 @@ export function createParachutistModel() {
   root.userData.key = "parachutist";
   setParachutistState(root, "airborne", 0, true);
   return root;
+}
+
+export function setParachutistRole(root, role = "player") {
+  const character = root?.userData?.parachutist?.character;
+  if (!character?.roleSurfaces) return null;
+  const roleColor = PARACHUTIST_ROLE_COLORS[role] ?? null;
+  for (const entry of character.roleSurfaces) {
+    if (roleColor == null) {
+      entry.surface.color.setHex(entry.color);
+      entry.surface.emissive.setHex(entry.emissive);
+      entry.surface.emissiveIntensity = entry.emissiveIntensity;
+    } else {
+      entry.surface.color.setHex(roleColor);
+      entry.surface.emissive.setHex(roleColor);
+      entry.surface.emissiveIntensity = 0.08;
+    }
+    entry.surface.needsUpdate = true;
+  }
+  root.userData.playerRole = roleColor == null ? "player" : role;
+  return roleColor;
 }
 
 export function setParachutistState(root, state, speed = 0) {

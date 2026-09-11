@@ -136,6 +136,90 @@ test.describe('mobile terrain recovery', () => {
     expect(layout.street.bottom).toBeLessThan(layout.buttons.top);
     await page.screenshot({path:'test-results/mobile-parachutist-portrait.png'});
   });
+
+  test('mobile multiplayer only shows the voice pill while talk is active and clears the credits', async ({page}) => {
+    await page.setViewportSize({width:851,height:393});
+    await page.goto('/');
+    await expect.poll(() => page.evaluate(() => !!window.__game)).toBe(true);
+    expect(await page.evaluate(() => window.__testGroundedParachutist())).toBe(true);
+    expect(await page.evaluate(() => window.__testEnableMobileVoice(false))).toBe(true);
+    await expect(page.locator('#touch-talk')).toBeVisible();
+    await expect(page.locator('#voice-ind')).toBeHidden();
+
+    expect(await page.evaluate(() => window.__testEnableMobileVoice(true))).toBe(true);
+    await expect(page.locator('#voice-ind')).toBeVisible();
+    await expect(page.locator('#voice-ind')).toHaveText('Talk Active');
+    const layout = await page.evaluate(() => {
+      const credits = document.querySelector('#map-credits');
+      credits.textContent = 'Terrain: Google Maps · imagery providers';
+      const creditRect = credits.getBoundingClientRect();
+      const buttons = document.querySelector('.touch-btns').getBoundingClientRect();
+      return {creditHeight:creditRect.height, creditTop:creditRect.top, buttonBottom:buttons.bottom};
+    });
+    expect(layout.creditHeight).toBeLessThanOrEqual(18);
+    expect(layout.buttonBottom).toBeLessThanOrEqual(layout.creditTop);
+  });
+});
+
+test('multiplayer aircraft labels show the nickname and live microphone icon', async ({page}) => {
+  test.setTimeout(25000);
+  await page.goto('/');
+  await expect.poll(() => page.evaluate(() => !!window.__game)).toBe(true);
+  expect(await page.evaluate(() => window.__testGroundedParachutist())).toBe(true);
+  await page.evaluate(() => window.__forceTestMate());
+  await expect(page.locator('.mate-label')).toBeVisible({timeout:15000});
+  await expect(page.locator('.mate-label-name')).toHaveText('Test Pilot');
+  await expect(page.locator('.mate-label-mic')).toBeVisible();
+  await expect(page.locator('.mate-label')).toHaveAttribute('aria-label', 'Test Pilot is talking');
+});
+
+test('large multiplayer lobbies scroll and keep chat below the QR panel', async ({page}) => {
+  await page.goto('/');
+  await expect.poll(() => page.evaluate(() => !!window.__game)).toBe(true);
+  await page.getByRole('button',{name:'Multiplayer',exact:true}).click();
+  expect(await page.evaluate(() => window.__testPopulateLobby(40))).toBe(40);
+  await expect(page.locator('#lobby-players .player-row')).toHaveCount(40);
+  await expect(page.locator('#lobby-chat-count')).toHaveText('40 players');
+  await expect(page.locator('[data-player-id="test-host"] .player-role-badge')).toHaveText('Admin');
+  await expect(page.locator('[data-player-id="test-host"] .player-role-badge')).toHaveClass(/admin/);
+
+  for (let index = 1; index <= 3; index += 1) {
+    await page.locator(`[data-player-id="test-player-${index}"] .leader-toggle`).click();
+  }
+  await expect(page.locator('.player-role-badge.leader')).toHaveCount(3);
+  await expect(page.locator('[data-player-id="test-player-1"] .player-role-badge')).toHaveText('Leader');
+  await expect(page.locator('[data-player-id="test-player-4"] .leader-toggle')).toBeDisabled();
+
+  await page.locator('[data-player-id="test-player-1"] .leader-toggle').click();
+  await expect(page.locator('[data-player-id="test-player-4"] .leader-toggle')).toBeEnabled();
+  await page.locator('[data-player-id="test-player-4"] .leader-toggle').click();
+  await expect(page.locator('.player-role-badge.leader')).toHaveCount(3);
+
+  const list = await page.locator('#lobby-players').evaluate(node => ({
+    overflowY:getComputedStyle(node).overflowY,
+    clientHeight:node.clientHeight,
+    scrollHeight:node.scrollHeight,
+  }));
+  expect(list.overflowY).toBe('auto');
+  expect(list.scrollHeight).toBeGreaterThan(list.clientHeight);
+
+  await page.locator('#lobby-chat-input').fill('<b>Hello all pilots</b>');
+  await page.locator('#lobby-chat-form button').click();
+  await expect(page.locator('.lobby-chat-message p')).toHaveText('<b>Hello all pilots</b>');
+  await expect(page.locator('#lobby-chat-messages b')).toHaveCount(0);
+
+  const railLayout = await page.evaluate(() => {
+    const qr = document.querySelector('#lobby-qr');
+    const chat = document.querySelector('#lobby-chat');
+    qr.hidden = false;
+    const qrRect = qr.getBoundingClientRect();
+    const chatRect = chat.getBoundingClientRect();
+    return {qrBottom:qrRect.bottom, chatTop:chatRect.top, chatWidth:chatRect.width};
+  });
+  expect(railLayout.chatTop).toBeGreaterThan(railLayout.qrBottom);
+  expect(railLayout.chatWidth).toBeGreaterThanOrEqual(210);
+  await page.locator('.player-row[data-player-id="test-host"]').scrollIntoViewIfNeeded();
+  await page.screenshot({path:'test-results/lobby-scroll-chat.png',fullPage:true});
 });
 
 test('music toggles stay synchronized between vehicle selection and gameplay', async ({page}) => {
@@ -184,6 +268,17 @@ test('right-dragging upward helps a landed parachutist climb after Space', async
   await expect.poll(() => page.evaluate(() => window.__dbg.height)).toBeGreaterThan(assistedHeight + 1);
   await page.mouse.up({button:'right'});
   await expect.poll(() => page.evaluate(() => window.__dbg?.parachutistCameraClimb)).toBeLessThan(0.1);
+});
+
+test('multiplayer contact nudges a player without destroying their vehicle', async ({page}) => {
+  await page.goto('/');
+  await expect.poll(() => page.evaluate(() => !!window.__game)).toBe(true);
+  expect(await page.evaluate(() => window.__testGroundedParachutist())).toBe(true);
+  const result = await page.evaluate(() => window.__testSoftPlayerBump());
+  expect(result.applied).toBe(true);
+  expect(result.moved).toBeGreaterThan(0.05);
+  expect(result.wasCrashed).toBe(false);
+  expect(result.crashed).toBe(false);
 });
 
 test('fighter streams terrain in smooth batches without lowering detail', async ({page}) => {

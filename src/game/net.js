@@ -83,7 +83,7 @@ export function hostRoom(handlers, existingId) {
   }
 
   function attach(c) {
-    if (conns.size >= 15 || conns.has(c.peer)) { c.close(); return; }
+    if (conns.has(c.peer)) { c.close(); return; }
     const pid = c.peer;
     conns.set(pid, c);
     const ready = () => handlers.onPeer?.(pid);
