@@ -1,4 +1,5 @@
 import { validMessage } from "./protocol.js";
+import { roomInvitationLink } from "./sharing.js";
 import { Peer } from "peerjs";
 
 const PEER_OPTS = {
@@ -48,9 +49,7 @@ export function parseRoomFromUrl() {
 }
 
 export function roomLink(id) {
-  const url = new URL(location.href);
-  url.hash = `r=${id}`;
-  return url.toString();
+  return roomInvitationLink(location.href, id);
 }
 
 export function wasHosting(id) {
@@ -145,13 +144,43 @@ export function joinRoom(hostId, handlers) {
   let tries = 0;
   let opened = false;
   let destroyed = false;
+  let retryTimer = null;
+  let attemptTimer = null;
+  let failureReported = false;
   const maxTries = 8;
+
+  function clearJoinTimers() {
+    if (retryTimer != null) clearTimeout(retryTimer);
+    if (attemptTimer != null) clearTimeout(attemptTimer);
+    retryTimer = null;
+    attemptTimer = null;
+  }
+
+  function failOrRetry(err = { type: "peer-unavailable" }) {
+    if (destroyed || opened) return;
+    if (attemptTimer != null) clearTimeout(attemptTimer);
+    attemptTimer = null;
+    if (tries < maxTries) {
+      if (retryTimer == null) {
+        retryTimer = setTimeout(() => {
+          retryTimer = null;
+          tryConnect();
+        }, 800);
+      }
+      return;
+    }
+    if (!failureReported) {
+      failureReported = true;
+      handlers.onError?.(err);
+    }
+  }
 
   function wire(c) {
     conn = c;
     c.on("open", () => {
       if (opened || destroyed) return;
       opened = true;
+      clearJoinTimers();
       handlers.onOpen?.(hostId, myId);
       handlers.onPeer?.();
     });
@@ -160,9 +189,13 @@ export function joinRoom(hostId, handlers) {
     c.on("close", () => {
       if (!destroyed && opened) handlers.onLeft?.();
     });
-    c.on("error", (err) => handlers.onError?.(err));
+    c.on("error", (err) => {
+      if (opened) handlers.onError?.(err);
+      else failOrRetry(err);
+    });
     if (c.open && !opened) {
       opened = true;
+      clearJoinTimers();
       handlers.onOpen?.(hostId, myId);
       handlers.onPeer?.();
     }
@@ -170,6 +203,8 @@ export function joinRoom(hostId, handlers) {
 
   function tryConnect() {
     if (destroyed || opened) return;
+    if (attemptTimer != null) clearTimeout(attemptTimer);
+    attemptTimer = null;
     tries += 1;
     handlers.onStatus?.(`Joining room… (${tries}/${maxTries})`);
     try {
@@ -181,12 +216,7 @@ export function joinRoom(hostId, handlers) {
       /* ignore */
     }
     wire(peer.connect(hostId, CONNECT_OPTS));
-    setTimeout(() => {
-      if (!opened && !destroyed && tries < maxTries) tryConnect();
-      else if (!opened && !destroyed) {
-        handlers.onError?.({ type: "peer-unavailable" });
-      }
-    }, 3500);
+    attemptTimer = setTimeout(() => failOrRetry(), 3500);
   }
 
   const api = {
@@ -208,6 +238,7 @@ export function joinRoom(hostId, handlers) {
     },
     destroy() {
       destroyed = true;
+      clearJoinTimers();
       try {
         conn?.close();
       } catch {
@@ -219,8 +250,8 @@ export function joinRoom(hostId, handlers) {
 
   peer.on("error", (err) => {
     if (destroyed) return;
-    if (err?.type === "peer-unavailable" && tries < maxTries) {
-      setTimeout(tryConnect, 800);
+    if (err?.type === "peer-unavailable") {
+      failOrRetry(err);
       return;
     }
     handlers.onError?.(err);

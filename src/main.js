@@ -12,6 +12,7 @@ import {
 } from './game/protocol.js';
 import { attributionSignature, renderAttributions } from './game/attribution.js';
 import QRCode from 'qrcode';
+import { invitationText, shareDestination, webSharePayload } from './game/sharing.js';
 import {
   WGS84_ELLIPSOID,
   CAMERA_FRAME,
@@ -624,6 +625,10 @@ const el = {
   lobbyQrCopy: document.getElementById("lobby-qr-copy"),
   lobbyQrShare: document.getElementById("lobby-qr-share"),
   lobbyQrFeedback: document.getElementById("lobby-qr-feedback"),
+  lobbyShare: document.getElementById("lobby-share"),
+  lobbyShareMore: document.getElementById("lobby-share-more"),
+  lobbyShareOptions: document.getElementById("lobby-share-options"),
+  lobbyShareFeedback: document.getElementById("lobby-share-feedback"),
   lobbyChat: document.getElementById("lobby-chat"),
   lobbyChatMessages: document.getElementById("lobby-chat-messages"),
   lobbyChatForm: document.getElementById("lobby-chat-form"),
@@ -888,6 +893,17 @@ function setLobbyQrButtons(enabled) {
   if (el.lobbyQrShare) el.lobbyQrShare.disabled = !enabled;
 }
 
+function setLobbyShareFeedback(message = "") {
+  if (el.lobbyShareFeedback) el.lobbyShareFeedback.textContent = message;
+}
+
+function setLobbyShareButtons(enabled) {
+  if (el.lobbyShareMore) el.lobbyShareMore.disabled = !enabled;
+  for (const button of el.lobbyShareOptions?.querySelectorAll("button") || []) {
+    button.disabled = !enabled;
+  }
+}
+
 async function updateLobbyQr(link = "") {
   if (!el.lobbyQr || !el.lobbyQrCanvas) return;
   if (isMobile || !link) {
@@ -944,17 +960,37 @@ async function copyLobbyQr() {
   return false;
 }
 
-async function shareLobbyQr() {
-  if (!lobbyQrState.blob || !lobbyQrState.link) return false;
-  const file = new File([lobbyQrState.blob], `flight-room-${mp.roomId || "invite"}.png`, { type: "image/png" });
-  const payload = {
-    title: "Flight Over the World multiplayer room",
-    text: "Scan the QR code or open the link to join my room.",
-    url: lobbyQrState.link,
-    files: [file],
-  };
-  if (!navigator.share || !navigator.canShare?.({ files: payload.files })) return false;
-  await navigator.share(payload);
+async function copyLobbyInvitation(link = lobbyQrState.link || el.lobbyLink?.value || "") {
+  if (!link) return false;
+  const text = invitationText(link);
+  if (navigator.clipboard?.writeText) {
+    await navigator.clipboard.writeText(text);
+    return true;
+  }
+  if (!el.lobbyLink) return false;
+  el.lobbyLink.focus();
+  el.lobbyLink.select();
+  return document.execCommand?.("copy") === true;
+}
+
+async function shareLobbyInvitation() {
+  const link = lobbyQrState.link || el.lobbyLink?.value || "";
+  if (!link) return false;
+  if (!navigator.share) return false;
+  await navigator.share(webSharePayload(link));
+  return true;
+}
+
+function openLobbyShareTarget(target) {
+  const link = lobbyQrState.link || el.lobbyLink?.value || "";
+  if (!link) return false;
+  const destination = shareDestination(target, link);
+  if (!destination) return false;
+  if (target === "email" || target === "sms") {
+    location.href = destination;
+  } else {
+    window.open(destination, "_blank", "noopener,noreferrer");
+  }
   return true;
 }
 
@@ -1155,6 +1191,8 @@ function renderLobby() {
   el.lobbyCity.readOnly = !mp.host;
   const link = mp.roomId ? roomLink(mp.roomId) : "";
   el.lobbyLink.value = link;
+  setLobbyShareButtons(!!link);
+  if (!link) setLobbyShareFeedback("");
   updateLobbyQr(link);
   renderLobbyChat();
 
@@ -2740,25 +2778,50 @@ el.lobbyQrCopy?.addEventListener("click", async () => {
   downloadLobbyQr();
   setLobbyQrFeedback("Image copy is unavailable here, so the QR was downloaded.");
 });
-el.lobbyQrShare?.addEventListener("click", async () => {
+el.lobbyQrShare?.addEventListener("click", () => {
+  downloadLobbyQr();
+  setLobbyQrFeedback("QR image saved.");
+});
+el.lobbyShareOptions?.addEventListener("click", async (event) => {
+  const button = event.target.closest("button[data-share-target]");
+  if (!button) return;
+  const target = button.dataset.shareTarget;
+  if (target === "youtube") {
+    try {
+      if (await copyLobbyInvitation()) {
+        setLobbyShareFeedback("Invitation copied — paste it into a YouTube post or video description.");
+        return;
+      }
+    } catch {
+      /* The fallback below explains how to copy it manually. */
+    }
+    el.lobbyLink.select();
+    setLobbyShareFeedback("Copy the selected link and paste it into YouTube.");
+    return;
+  }
+  if (openLobbyShareTarget(target)) {
+    setLobbyShareFeedback(`${button.textContent.trim()} opened.`);
+  }
+});
+el.lobbyShareMore?.addEventListener("click", async () => {
   try {
-    if (await shareLobbyQr()) {
-      setLobbyQrFeedback("Share panel opened.");
+    if (await shareLobbyInvitation()) {
+      setLobbyShareFeedback("System share panel opened with the room link.");
       return;
     }
   } catch (error) {
     if (error?.name === "AbortError") return;
   }
   try {
-    if (await copyLobbyQr()) {
-      setLobbyQrFeedback("Sharing is unavailable here, so the QR was copied.");
+    if (await copyLobbyInvitation()) {
+      setLobbyShareFeedback("Sharing is unavailable here, so the invitation was copied.");
       return;
     }
   } catch {
-    /* Fall through to a local PNG download. */
+    /* Select the existing link as the final fallback. */
   }
-  downloadLobbyQr();
-  setLobbyQrFeedback("Sharing is unavailable here, so the QR was downloaded.");
+  el.lobbyLink.select();
+  setLobbyShareFeedback("Copy the selected room link to share it.");
 });
 el.lobbyStart.addEventListener("click", () => {
   if (!gameReady) { setLobbyStatus('Terrain is not ready. Please try again in a moment.', true); return; }
