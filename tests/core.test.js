@@ -15,18 +15,25 @@ import {
   escapeHtml,
   canModeratePlayer,
   hasRankStartQuorum,
+  canEditLobbyProfile,
+  canChooseLobbyVehicle,
   normalizePlayerName,
   normalizeChatMessage,
+  playerPresence,
+  PLAYER_PRESENCE_LABELS,
+  supportsMultiplayerRoundConfig,
+  MULTIPLAYER_PROTOCOL_VERSION,
   PLAYER_NAME_MAX,
   CHAT_MESSAGE_MAX,
 } from '../src/game/protocol.js';
+import { multiplayerSpacing, multiplayerSpawnPoint, nearbyPlayerPose } from '../src/game/multiplayerSpawn.js';
 import { renderRatio, AdaptiveQuality, terrainStreamProfile } from '../src/game/quality.js';
 import { attributionSignature } from '../src/game/attribution.js';
 import { disposeModel } from '../src/game/dispose.js';
 import { streetViewUrl } from '../src/game/streetview.js';
 import { SpaceFlightController } from '../src/game/space.js';
 import { ContactConfirmation, parachutistCameraClimbAssist, raycastVisibleTerrain, rocketLaunchCameraPhase, updateChaseOffset } from '../src/game/flightSafety.js';
-import { classifyPlayerContact, clampBumpVector, MAX_PLAYER_BUMP, PLAYER_STACK_HEIGHT } from '../src/game/playerInteraction.js';
+import { classifyPlayerContact, sweptPlayerContact, clampBumpVector, MAX_PLAYER_BUMP, PLAYER_STACK_HEIGHT } from '../src/game/playerInteraction.js';
 import { roomInvitationLink } from '../src/game/sharing.js';
 import { Box3, Group, Mesh, BoxGeometry, MeshBasicMaterial, Quaternion, Raycaster, Texture, Vector3 } from 'three';
 
@@ -112,6 +119,11 @@ test('multiplayer rejects forged host commands, malformed poses and unsafe objec
   assert.equal(validMessage({t:'hello',name:'Pilot',plane:'pa28',resumeKey:'pilot_123456789012'},true),true);
   assert.equal(validMessage({t:'hello',name:'Pilot',plane:'pa28',resumeKey:'short'},true),false);
   assert.equal(validMessage({t:'bye'},true),true);
+  assert.equal(validMessage({t:'roster',lockedPlane:'rocket'}),true);
+  assert.equal(validMessage({t:'roster',lockedPlane:''}),true);
+  assert.equal(validMessage({t:'roster',lockedPlane:'unknown'}),false);
+  assert.equal(validMessage({t:'plane',plane:'jet',lockedPlane:''},true),false);
+  assert.equal(validMessage({t:'ready',ready:'yes'},true),false);
   assert.equal(validMessage({...pose,plane:'parachutist',state:'grounded',motion:2},true),true);
   assert.equal(validMessage({...pose,state:'teleporting'},true),false);
   for (const field of ['lat','lon','h','heading','pitch','roll','seq','at']) assert.equal(validMessage({...pose,[field]:NaN},true),false);
@@ -134,6 +146,109 @@ test('multiplayer rejects forged host commands, malformed poses and unsafe objec
   assert.equal(validMessage({t:'muted',muted:true},true),false);
   assert.equal(escapeHtml('<img src=x>'), '&lt;img src=x&gt;');
 });
+test('ready profiles cannot be edited and only an unready admin can choose a locked vehicle', () => {
+  for (const player of [{}, {ready:false,inRound:false}]) {
+    assert.equal(canEditLobbyProfile(player),true);
+    assert.equal(canChooseLobbyVehicle(player),true);
+    assert.equal(canChooseLobbyVehicle(player,'rocket'),false);
+    assert.equal(canChooseLobbyVehicle(player,'rocket',true),true);
+  }
+  for (const player of [{ready:true}, {inRound:true}, {ready:true,inRound:true}]) {
+    assert.equal(canEditLobbyProfile(player),false);
+    assert.equal(canChooseLobbyVehicle(player),false);
+    assert.equal(canChooseLobbyVehicle(player,'rocket',true),false);
+  }
+});
+test('Street View takes priority over AFK and manual pause presence', () => {
+  assert.equal(playerPresence(), 'active');
+  assert.equal(playerPresence({paused:true}), 'paused');
+  assert.equal(playerPresence({away:true}), 'afk');
+  assert.equal(playerPresence({paused:true,away:true}), 'afk');
+  for (const paused of [true,false]) for (const away of [true,false]) {
+    assert.equal(playerPresence({paused,away,streetView:true}), 'street-view');
+  }
+  assert.equal(PLAYER_PRESENCE_LABELS.active, '');
+  assert.equal(PLAYER_PRESENCE_LABELS['street-view'], 'Street View active');
+});
+
+test('presence messages and roster statuses are validated without breaking older clients', () => {
+  for (const presence of Object.keys(PLAYER_PRESENCE_LABELS)) {
+    assert.equal(validMessage({t:'presence',presence},true), true);
+    assert.equal(validMessage({t:'hello',name:'Pilot',plane:'pa28',presence},true), true);
+    assert.equal(validMessage({t:'roster',players:[{id:'peer-1',name:'Pilot',plane:'pa28',presence}]}), true);
+  }
+  for (const presence of [null, true, {}, 'unknown', 'constructor']) {
+    assert.equal(validMessage({t:'presence',presence},true), false);
+  }
+  assert.equal(validMessage({t:'presence'},true), false);
+  assert.equal(validMessage({t:'hello',name:'Pilot',plane:'pa28',presence:'unknown'},true), false);
+  assert.equal(validMessage({t:'roster',players:[{id:'peer-1',name:'Pilot',plane:'pa28',presence:'unknown'}]}), false);
+  assert.equal(validMessage({t:'roster',players:[{id:'peer-1',name:'Pilot',plane:'pa28'}]}), true);
+});
+
+test('multiplayer session config is host-authoritative and an optional version marker only selects capabilities', () => {
+  assert.equal(supportsMultiplayerRoundConfig(MULTIPLAYER_PROTOCOL_VERSION), true);
+  assert.equal(supportsMultiplayerRoundConfig(MULTIPLAYER_PROTOCOL_VERSION + 1), true);
+  for (const version of [undefined, null, 1, '2']) assert.equal(supportsMultiplayerRoundConfig(version), false);
+  assert.equal(validMessage({t:'hello',name:'Public client',plane:'pa28'},true), true);
+  assert.equal(validMessage({t:'welcome',id:'guest',roster:[]}), true);
+  const start = {t:'start',lat:52,lon:16,mode:'free',protocolVersion:2,
+    lockedPlane:'parachutist',vehicles:{host:'parachutist',guest:'parachutist'},spawnSpacing:12};
+  assert.equal(validMessage(start), true);
+  assert.equal(validMessage({...start,vehicles:{guest:'invalid'}}), false);
+  assert.equal(validMessage({...start,vehicles:[]}), false);
+  assert.equal(validMessage({...start,spawnSpacing:1000}), false);
+  assert.equal(validMessage({t:'hello',protocolVersion:2.5},true), false);
+  assert.equal(validMessage({t:'hello',vehicles:{guest:'parachutist'}},true), false);
+  assert.equal(validMessage({t:'hello',spawnSpacing:12},true), false);
+});
+
+test('round ids are optional for legacy clients and bounded for multiplayer loading controls', () => {
+  const messages = [{t:'start',lat:52,lon:16,mode:'free'},
+    {t:'snapped',h:6000,gh:5680,heading:0,probed:true},
+    {t:'go',h:6000,gh:5680,heading:0}, {t:'done'}, {t:'roundEnd'}];
+  for (const message of messages) {
+    const guest = ['snapped','done'].includes(message.t);
+    assert.equal(validMessage(message,guest),true);
+    assert.equal(validMessage({...message,roundId:'flight-123_abc'},guest),true);
+    for (const roundId of ['',42,'x'.repeat(81),'../other-flight']) {
+      assert.equal(validMessage({...message,roundId},guest),false);
+    }
+  }
+});
+
+test('spawn spacing is fixed by the host and positions stay bounded at poles and date line', () => {
+  assert.equal(multiplayerSpacing([1,9]), 12.15);
+  assert.equal(multiplayerSpacing([11,32]), 40);
+  for (const lat of [-90, 0, 52, 90]) for (const lon of [-180, 16, 180]) {
+    const spawn = multiplayerSpawnPoint(lat,lon,1,3,40);
+    assert.ok(Number.isFinite(spawn.lat) && spawn.lat >= -90 && spawn.lat <= 90);
+    assert.ok(Number.isFinite(spawn.lon) && spawn.lon >= -180 && spawn.lon <= 180);
+  }
+  assert.deepEqual(multiplayerSpawnPoint(52,16,0,1,40), {lat:52,lon:16});
+});
+
+test('late join offsets the current anchor rather than the original round location', () => {
+  const anchor = {space:false,lat:48.8584,lon:2.2945,h:160,heading:0,state:'airborne'};
+  const joined = nearbyPlayerPose(anchor,2,20);
+  assert.ok(Math.abs(joined.lat - anchor.lat) < 0.001);
+  assert.ok(Math.abs(joined.lon - anchor.lon) < 0.001);
+  assert.notEqual(joined.lat, anchor.lat);
+  assert.equal(joined.h, anchor.h);
+  assert.notDeepEqual(nearbyPlayerPose(anchor,1,20), joined);
+});
+
+test('space late joins have a small offset and do not inherit autopilot or orbital position snapping', () => {
+  const anchor = {space:true,x:1000,y:30,z:500,fx:0,fy:0,fz:-1,qx:0,qy:0,qz:0,qw:1,motion:73.6,
+    orbitBody:'Mars',surfaceBody:'Mars',autopilot:true,hyperdrive:true};
+  const pose = nearbyPlayerPose(anchor,2,40);
+  assert.ok(Math.hypot(pose.x-anchor.x,pose.y-anchor.y,pose.z-anchor.z) <= 2.51);
+  assert.equal(pose.orbitBody,'');
+  assert.equal(pose.autopilot,false);
+  assert.equal(pose.hyperdrive,false);
+  assert.equal(validMessage({t:'resume',joining:true,plane:'rocket',pose}),true);
+});
+
 test('legitimate guest messages pass validation', () => {
   for (const message of [{t:'hello',name:'Pilot',plane:'pa28'},{t:'name',name:'Captain Beniamin'},{t:'chat',text:'Hello lobby'},{t:'ready',ready:true},{t:'talk',on:true},{t:'moderate',action:'kick',target:'peer-1'},{t:'bump',target:'peer-1',ix:2,iy:0,iz:-1},{t:'snapped',h:420,gh:120,heading:0,probed:true},{t:'guess',lat:50,lon:10},{t:'rematch'},{t:'done'}]) assert.equal(validMessage(message,true),true, message.t);
   assert.equal(validMessage({t:'name',name:'x'.repeat(PLAYER_NAME_MAX + 1)},true),false);
@@ -237,6 +352,32 @@ test('multiplayer contacts push gently, never exceed the impulse cap and allow p
   const limited = clampBumpVector(20, 0, 0);
   assert.ok(Math.hypot(limited.x, limited.y, limited.z) <= MAX_PLAYER_BUMP);
 });
+test('contacts cover every aircraft wing, flying canopies and the suspended character separately', () => {
+  for (const [key, span] of [['pa28',11], ['q400',28], ['citation',16], ['jet',10], ['rocket',12]]) {
+    const options = {localKey:key,localState:'airborne',localWingspan:span,
+      remoteKey:key,remoteState:'airborne',remoteWingspan:span,verticalDelta:0};
+    assert.equal(classifyPlayerContact({...options,horizontalDistance:span - 0.1})?.type,'push',key);
+    assert.equal(classifyPlayerContact({...options,horizontalDistance:span + 0.1}),null,key);
+  }
+  const person = {localKey:'parachutist',localState:'airborne',localWingspan:9.2,
+    remoteKey:'parachutist',remoteState:'airborne',remoteWingspan:9.2};
+  assert.equal(classifyPlayerContact({...person,horizontalDistance:9,verticalDelta:0})?.type,'push');
+  assert.equal(classifyPlayerContact({...person,horizontalDistance:0.5,verticalDelta:6.3})?.type,'push');
+  assert.equal(classifyPlayerContact({...person,horizontalDistance:4,verticalDelta:3.5}),null);
+});
+
+test('a fast crossing produces a bounded bump even with no endpoint overlap', () => {
+  const options = {localKey:'jet',localState:'airborne',localWingspan:10,
+    remoteKey:'jet',remoteState:'airborne',remoteWingspan:10,localMotion:420,remoteMotion:420};
+  const contact = sweptPlayerContact(options,{x:-24,y:0,z:1},{x:24,y:0,z:1});
+  assert.equal(contact?.type,'push');
+  assert.equal(contact?.swept,true);
+  assert.ok(contact.strength <= MAX_PLAYER_BUMP);
+  assert.equal(sweptPlayerContact(options,{x:-24,y:30,z:1},{x:24,y:30,z:1}),null);
+  assert.equal(sweptPlayerContact(options,{x:24,y:0,z:1},{x:48,y:0,z:1}),null);
+  assert.equal(sweptPlayerContact(options,{x:NaN,y:0,z:1},{x:24,y:0,z:1}),null);
+});
+
 function simulate(hz, lat=52, lon=16, heading=90, input={roll:0.4,pitch:0.1,throttle:0}) {
   const plane = new PlaneController(lat,lon,500,heading);
   for (let i=0;i<hz*20;i++) plane.update(1/hz,input);

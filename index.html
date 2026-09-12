@@ -15,6 +15,7 @@
     <link rel="stylesheet" href="/src/style.css" />
   </head>
   <body>
+    <div id="multiplayer-notice" role="alert" aria-live="assertive" hidden></div>
     <audio id="bgm" autoplay loop playsinline preload="auto" src="./music/reflection.mp3"></audio>
     <audio id="black-hole-score" playsinline preload="metadata" src="./music/no-time-for-caution.mp3"></audio>
     <div id="fatal" class="hidden">
@@ -58,6 +59,7 @@
           <span id="lobby-car-name">Piper PA-28</span>
           <span id="lobby-car-desc">Light propeller – 170 km/h</span>
         </div>
+        <p id="lobby-vehicle-lock-status" class="lobby-vehicle-lock-status" role="status" hidden></p>
         <button id="music-lobby-toggle" class="menu-music-toggle" type="button" aria-pressed="false">🔊 Music on</button>
         <div class="modes lobby-modes single-mode">
           <button class="mode-card selected" data-mode="free" type="button">
@@ -148,6 +150,7 @@
       <div class="mp-wait-card">
         <div class="spin" aria-hidden="true"></div>
         <p id="mp-wait-text">Waiting for players…</p>
+        <button id="mp-wait-lobby" class="ghost" type="button" hidden>Back to lobby</button>
       </div>
     </div>
 

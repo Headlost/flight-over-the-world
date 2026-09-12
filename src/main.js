@@ -7,11 +7,18 @@ import {
   escapeHtml,
   canModeratePlayer,
   hasRankStartQuorum,
+  canEditLobbyProfile,
+  canChooseLobbyVehicle,
   normalizePlayerName,
   normalizeChatMessage,
+  playerPresence,
+  PLAYER_PRESENCE_LABELS,
+  supportsMultiplayerRoundConfig,
+  MULTIPLAYER_PROTOCOL_VERSION,
   PLAYER_NAME_MAX,
   CHAT_MESSAGE_MAX,
 } from './game/protocol.js';
+import { multiplayerSpacing, multiplayerSpawnPoint, nearbyPlayerPose } from './game/multiplayerSpawn.js';
 import { attributionSignature, renderAttributions } from './game/attribution.js';
 import QRCode from 'qrcode';
 import {
@@ -100,6 +107,7 @@ import {
 } from "./game/flightSafety.js";
 import {
   classifyPlayerContact,
+  sweptPlayerContact,
   clampBumpVector,
   MAX_PLAYER_BUMP,
 } from "./game/playerInteraction.js";
@@ -469,9 +477,11 @@ let lastWingProbeAt = -Infinity;
 let lastCameraProbeAt = -Infinity;
 let streetModeActive = false;
 let externalStreetWindow = null;
+let streetViewWasPaused = false;
 let selectedPlane = "pa28";
 let menuOpen = true;
 let paused = false;
+let gameAway = false;
 let pendingSnap = false; // po teleporcie: jednorazowe dosadzenie na właściwą wysokość
 let startLat = 52.38871, startLon = 16.60069; // Niepruszewo
 let camOffset = PLANES.pa28.cam;
@@ -553,9 +563,14 @@ const mp = {
   myApproved: false,
   myReady: false,
   myScore: 0,
+  myPresence: "active",
+  lastPresenceSent: null,
   waiting: false,
   inRound: false,
   roundActive: false,
+  lockedPlane: "",
+  spawnSpacing: null,
+  compatibilityReleased: new Set(),
   players: new Map(),
   departed: new Map(),
   kicked: new Set(),
@@ -569,6 +584,9 @@ const mp = {
   truth: null,
   roundStart: null,
   goPayload: null,
+  loadingStartedAt: 0,
+  loadingTimer: null,
+  lastSnapAt: 0,
   lastPoseAt: 0,
   poseSeq: 0,
   snapInfo: new Map(),
@@ -580,6 +598,7 @@ const mp = {
   chat: [],
   bumpRelayAt: new Map(),
   contactAt: new Map(),
+  contactTracks: new Map(),
 };
 
 const LOBBY_CHAT_HISTORY_MAX = 100;
@@ -632,6 +651,7 @@ const el = {
   gmScoreRight: document.getElementById("gm-score-right"),
   mpWait: document.getElementById("mp-wait"),
   mpWaitText: document.getElementById("mp-wait-text"),
+  mpWaitLobby: document.getElementById("mp-wait-lobby"),
   guessScope: document.getElementById("guess-scope"),
   landing: document.getElementById("landing"),
   lobby: document.getElementById("lobby"),
@@ -693,6 +713,7 @@ const el = {
   lobbyCarNext: document.getElementById("lobby-car-next"),
   lobbyCarName: document.getElementById("lobby-car-name"),
   lobbyCarDesc: document.getElementById("lobby-car-desc"),
+  lobbyVehicleLockStatus: document.getElementById("lobby-vehicle-lock-status"),
   fatal: document.getElementById("fatal"),
   fatalText: document.getElementById("fatal-text"),
   fatalOk: document.getElementById("fatal-ok"),
@@ -739,6 +760,10 @@ function ensureLobbyCarousel() {
 }
 let planeIdx = 0;
 function selectPlane(i, dir, silent = false) {
+  if (!silent && mp.active && !canChooseLobbyVehicle(localLobbyProfile(), mp.lockedPlane, mp.host)) {
+    setLobbyStatus(mp.myReady ? "Cancel ready before changing your vehicle" : "Vehicle selection is locked", true);
+    return false;
+  }
   planeIdx = (i + PLANE_ORDER.length) % PLANE_ORDER.length;
   selectedPlane = PLANE_ORDER[planeIdx];
   carousel.show(selectedPlane, dir);
@@ -751,9 +776,16 @@ function selectPlane(i, dir, silent = false) {
   document.body.classList.toggle("parachutist-selected", selectedPlane === "parachutist");
   document.body.classList.toggle("rocket-selected", selectedPlane === "rocket");
   if (!silent && mp.active && mp.net) {
+    if (mp.host && mp.lockedPlane) {
+      mp.lockedPlane = selectedPlane;
+      enforceLobbyVehicleLock();
+    }
     mp.net.send({ t: "plane", plane: selectedPlane, from: mp.myId });
+    if (mp.host) broadcastRoster();
+    if (mp.host && mp.lockedPlane) announceLobbyVehicleLock();
     renderLobby();
   }
+  return true;
 }
 el.carPrev.addEventListener("click", () => selectPlane(planeIdx - 1, -1));
 el.carNext.addEventListener("click", () => selectPlane(planeIdx + 1, 1));
@@ -899,6 +931,16 @@ function setLobbyStatus(msg, isErr = false) {
   el.lobbyStatus.classList.toggle("err", isErr);
 }
 
+let multiplayerNoticeTimer = null;
+function showMultiplayerNotice(message) {
+  const notice = document.getElementById("multiplayer-notice");
+  if (!notice) return;
+  clearTimeout(multiplayerNoticeTimer);
+  notice.textContent = message;
+  notice.hidden = !message;
+  if (message) multiplayerNoticeTimer = setTimeout(() => { notice.hidden = true; }, 8000);
+}
+
 const lobbyQrState = { link: "", blob: null, generation: 0 };
 
 function setLobbyQrFeedback(message = "") {
@@ -959,13 +1001,6 @@ function otherPlayers() {
   return [...mp.players.values()];
 }
 
-function playablePlayers() {
-  const list = [];
-  if (!mp.waiting && mp.myApproved) list.push({ id: mp.myId });
-  for (const p of mp.players.values()) if (!p.waiting && p.approved) list.push(p);
-  return list;
-}
-
 function inRoundPlayers() {
   const list = [];
   if (mp.inRound) list.push({ id: mp.myId, name: mp.myName });
@@ -1016,6 +1051,7 @@ function rosterPayload() {
       score: mp.myScore,
       waiting: false,
       inRound: mp.inRound,
+      presence: currentPlayerPresence(),
     },
     ...otherPlayers().map((p) => ({
       id: p.id,
@@ -1028,6 +1064,7 @@ function rosterPayload() {
       score: p.score,
       waiting: !!p.waiting,
       inRound: !!p.inRound,
+      presence: p.presence || "active",
     })),
   ];
 }
@@ -1041,13 +1078,18 @@ function applyRoster(list = []) {
       mp.myApproved = p.role === "admin" || p.role === "leader" || !!p.approved;
       mp.myMuted = !!p.muted;
       mp.myScore = p.score ?? mp.myScore;
+      mp.myReady = !!p.ready;
       mp.waiting = !!p.waiting;
       mp.inRound = !!p.inRound;
+      if (!mp.inRound && PLANES[p.plane] && p.plane !== selectedPlane) {
+        selectPlane(PLANE_ORDER.indexOf(p.plane), 0, true);
+      }
       continue;
     }
     keep.add(p.id);
     const prev = mp.players.get(p.id) || {};
     mp.players.set(p.id, { ...prev, ...p, role: normalizedPlayerRole(p.role, p.id === mp.roomId) });
+    if (p.inRound === false) retireMultiplayerAvatar(p.id);
   }
   for (const id of [...mp.players.keys()]) {
     if (!keep.has(id)) {
@@ -1058,7 +1100,9 @@ function applyRoster(list = []) {
       mp.snapped.delete(id);
       mp.talkers.delete(id);
       mp.contactAt.delete(id);
+      mp.contactTracks.delete(id);
       mp.bumpRelayAt.delete(id);
+      for (const relays of mp.bumpRelayAt.values()) relays.delete(id);
       dropVoicePeer(id);
       disposeMate(id);
     }
@@ -1073,11 +1117,48 @@ function broadcastRoster() {
     t: "roster",
     players: rosterPayload(),
     roundActive: mp.roundActive,
+    lockedPlane: mp.lockedPlane,
     mode,
     scope: guessScope,
     city: el.lobbyCity.value,
     ...regionPayload(),
   });
+}
+
+function currentPlayerPresence() {
+  return playerPresence({ paused: paused && !menuOpen, away: gameAway || document.hidden, streetView: streetModeActive });
+}
+
+function updateLobbyPresence() {
+  for (const badge of el.lobbyPlayers.querySelectorAll(".player-presence")) {
+    const id = badge.closest(".player-row")?.dataset.playerId;
+    const presence = id === mp.myId ? currentPlayerPresence() : mp.players.get(id)?.presence || "active";
+    badge.textContent = PLAYER_PRESENCE_LABELS[presence] || "";
+    badge.dataset.presence = presence;
+    badge.hidden = !badge.textContent;
+  }
+}
+
+function syncPlayerPresence(force = false) {
+  const presence = currentPlayerPresence();
+  const changed = mp.myPresence !== presence;
+  mp.myPresence = presence;
+  if (changed) updateLobbyPresence();
+  if (!mp.active || !mp.net || !mp.myId) {
+    mp.lastPresenceSent = null;
+    return;
+  }
+  if (force || mp.lastPresenceSent !== presence) {
+    mp.lastPresenceSent = presence;
+    mp.net.send({ t: "presence", from: mp.myId, presence });
+  }
+}
+
+function applyPlayerPresence(id, presence) {
+  const player = mp.players.get(id);
+  if (!player || id === mp.myId || player.presence === presence || !Object.hasOwn(PLAYER_PRESENCE_LABELS, presence)) return;
+  player.presence = presence;
+  updateLobbyPresence();
 }
 
 function chatPlayerName(id, fallback = "Pilot") {
@@ -1150,7 +1231,70 @@ function sendLobbyChat(value) {
   return true;
 }
 
+function localLobbyProfile() {
+  return { ready: mp.myReady || mp.launching, inRound: mp.inRound };
+}
+
+function enforceLobbyVehicleLock() {
+  if (!mp.host || !mp.lockedPlane) return;
+  for (const player of mp.players.values()) {
+    if (!player.inRound) player.plane = mp.lockedPlane;
+  }
+  for (const record of mp.departed.values()) {
+    if (!record.player.inRound) record.player.plane = mp.lockedPlane;
+  }
+}
+
+function toggleLobbyVehicleLock() {
+  if (!mp.host || mp.roundActive || !canEditLobbyProfile(localLobbyProfile())) return false;
+  mp.lockedPlane = mp.lockedPlane ? "" : selectedPlane;
+  enforceLobbyVehicleLock();
+  broadcastRoster();
+  announceLobbyVehicleLock();
+  renderLobby();
+  return true;
+}
+
+function announceLobbyVehicleLock() {
+  if (!mp.host) return;
+  // The existing chat channel also reaches clients predating the lock banner.
+  sendLobbyChat(mp.lockedPlane
+    ? `🔒 Admin locked vehicle selection. Everyone must use ${PLANES[mp.lockedPlane].name}; choosing another vehicle is disabled.`
+    : "🔓 Admin unlocked vehicle selection. Cancel ready if you want to choose another vehicle.");
+}
+
+function applyRemoteVehicleLock(data) {
+  const previous = mp.lockedPlane;
+  if (!mp.host && data.lockedPlane != null) mp.lockedPlane = data.lockedPlane;
+  if (!mp.host && mp.lockedPlane && !mp.inRound && selectedPlane !== mp.lockedPlane) {
+    selectPlane(PLANE_ORDER.indexOf(mp.lockedPlane), 0, true);
+  }
+  if (!mp.host && previous !== mp.lockedPlane) showMultiplayerNotice(mp.lockedPlane
+    ? `Admin locked vehicle selection. Everyone must use ${PLANES[mp.lockedPlane].name}; choosing another vehicle is disabled.`
+    : "Admin unlocked vehicle selection. Cancel ready if you want to choose another vehicle.");
+}
+
+function updateLobbyVehicleControls() {
+  const profile = localLobbyProfile();
+  const canChoose = canChooseLobbyVehicle(profile, mp.lockedPlane, mp.host);
+  el.lobbyCarPrev.disabled = !canChoose;
+  el.lobbyCarNext.disabled = !canChoose;
+  const status = el.lobbyVehicleLockStatus;
+  if (!status) return;
+  const notices = [];
+  if (!canEditLobbyProfile(profile)) notices.push(mp.inRound
+    ? "Your nickname and vehicle are locked during the game."
+    : "Ready — cancel ready to edit your nickname or vehicle.");
+  if (mp.lockedPlane) notices.push(mp.host
+    ? "Vehicle lock on — your selection applies to everyone in the lobby."
+    : `🔒 Admin locked vehicle selection to ${PLANES[mp.lockedPlane].name}. You cannot choose another vehicle.`);
+  status.classList.toggle("admin-locked", !!mp.lockedPlane && !mp.host);
+  status.textContent = notices.join(" ");
+  status.hidden = !notices.length;
+}
+
 function renderLobby() {
+  updateLobbyVehicleControls();
   const leaderCount = otherPlayers().filter((player) => player.role === "leader").length;
   const rows = [
     playerRow({
@@ -1171,6 +1315,7 @@ function renderLobby() {
     rows.push(`<div class="player-row empty">Waiting for players… send the link</div>`);
   }
   el.lobbyPlayers.innerHTML = rows.join("");
+  updateLobbyPresence();
   el.lobbyScopes.classList.toggle("locked", !mp.host);
   document.querySelector(".lobby-modes")?.classList.toggle("locked", !mp.host);
   el.lobbyCity.classList.toggle("locked", !mp.host);
@@ -1191,13 +1336,11 @@ function renderLobby() {
         ? "Cancel ready"
         : "Start";
 
-  const playable = playablePlayers().length;
   const required = rosterPayload().filter((player) => player.role === "admin" || player.role === "leader");
   const requiredReady = required.filter((player) => player.ready).length;
   if (!mp.myApproved) setLobbyStatus("Awaiting approval from an Admin or Leader");
   else if (canJoinRound) setLobbyStatus("Round in progress – you can join now");
   else if (queued) setLobbyStatus("Round in progress – awaiting approval");
-  else if (playable < 2) setLobbyStatus("Send the link to friends – everyone in the room must press Start");
   else if (hasRankStartQuorum(required)) setLobbyStatus("Starting…");
   else if (mp.myReady) setLobbyStatus(`Waiting for Admin and Leaders (${requiredReady}/${required.length})`);
   else setLobbyStatus(`Admin and all Leaders must press Start (${requiredReady}/${required.length})`);
@@ -1225,11 +1368,13 @@ function playerRow(p, isSelf, leaderCount = 0) {
     cls = " ready";
   }
   const editable = isSelf || mp.host;
+  const profile = isSelf ? localLobbyProfile() : p;
+  const profileLocked = !canEditLobbyProfile(profile);
   const role = playerRole(p.id || mp.myId);
   const playerId = escapeHtml(p.id || mp.myId);
   const inputId = isSelf ? "player-name-input" : `player-name-${playerId}`;
   const name = editable
-    ? `<form class="player-name-form" data-player-id="${playerId}"><label class="sr-only" for="${inputId}">${isSelf ? "Your nickname" : `Nickname for ${escapeHtml(p.name)}`}</label><input id="${inputId}" class="p-name-input" name="nickname" type="text" value="${escapeHtml(p.name)}" maxlength="${PLAYER_NAME_MAX}" ${isSelf ? 'autocomplete="nickname"' : 'autocomplete="off"'}><button type="submit">Save</button>${isSelf ? '<span class="you-label">You</span>' : ""}</form>`
+    ? `<form class="player-name-form" data-player-id="${playerId}"><label class="sr-only" for="${inputId}">${isSelf ? "Your nickname" : `Nickname for ${escapeHtml(p.name)}`}</label><input id="${inputId}" class="p-name-input" name="nickname" type="text" value="${escapeHtml(p.name)}" maxlength="${PLAYER_NAME_MAX}" ${profileLocked ? 'disabled title="Cancel ready before editing this profile"' : ""} ${isSelf ? 'autocomplete="nickname"' : 'autocomplete="off"'}><button type="submit" ${profileLocked ? "disabled" : ""}>Save</button>${isSelf ? '<span class="you-label">You</span>' : ""}</form>`
     : `<span class="p-name">${escapeHtml(p.name)}</span>`;
   const leaderLimitReached = leaderCount >= MAX_LOBBY_LEADERS && role !== "leader";
   const leaderToggle = mp.host && !isSelf
@@ -1244,12 +1389,16 @@ function playerRow(p, isSelf, leaderCount = 0) {
   const canChangeApproval = canModerate && role === "player";
   const approved = automaticallyApproved || !!p.approved;
   const approval = `<label class="player-approval${approved ? " approved" : ""}" title="${approved ? "Approved for the game" : "Awaiting approval"}"><input class="approval-toggle" type="checkbox" data-player-id="${playerId}" ${approved ? "checked" : ""} ${canChangeApproval ? "" : "disabled"}><span>Approved</span></label>`;
-  return `<div class="player-row${cls}${p.muted ? " muted" : ""}${approved ? " approved" : " unapproved"}" data-player-id="${playerId}"><div class="p-meta"><div class="p-name-line">${name}<span class="p-role-controls">${roleBadge(role)}${leaderToggle}${approval}${moderation}</span></div><span class="p-plane">${escapeHtml(plane)}${escapeHtml(pts)}${mutedBadge}</span></div><span class="p-ready">${badge}</span></div>`;
+  const vehicleLock = isSelf && mp.host
+    ? `<button id="lobby-vehicle-lock" class="vehicle-lock-toggle${mp.lockedPlane ? " active" : ""}" type="button" aria-label="Lock vehicle for everyone" aria-pressed="${!!mp.lockedPlane}" title="Everyone in the lobby will use the Admin's selected vehicle" ${profileLocked || mp.roundActive ? "disabled" : ""}><span class="role-cube admin" aria-hidden="true"></span><span aria-hidden="true">${mp.lockedPlane ? "🔒" : "🔓"}</span><span>${mp.lockedPlane ? "Vehicle locked" : "Lock vehicle"}</span></button>`
+    : "";
+  return `<div class="player-row${cls}${p.muted ? " muted" : ""}${approved ? " approved" : " unapproved"}" data-player-id="${playerId}"><div class="p-meta"><div class="p-name-line">${name}<span class="p-role-controls">${roleBadge(role)}${vehicleLock}${leaderToggle}${approval}${moderation}</span></div><span class="p-plane">${escapeHtml(plane)}${escapeHtml(pts)}${mutedBadge}<span class="player-presence" hidden></span></span></div><span class="p-ready">${badge}</span></div>`;
 }
 
 function renamePlayer(playerId, value) {
   const isSelf = !playerId || playerId === mp.myId;
   if (!isSelf && (!mp.host || !mp.players.has(playerId))) return;
+  if (!canEditLobbyProfile(isSelf ? localLobbyProfile() : mp.players.get(playerId))) return;
   const currentName = isSelf ? mp.myName : mp.players.get(playerId).name;
   const requested = normalizePlayerName(value, currentName);
   if (mp.host) {
@@ -1495,6 +1644,54 @@ function resumeMessage(record) {
   };
 }
 
+function currentLocalPlayerPose() {
+  if (!plane || !mp.inRound) return null;
+  if (spaceModeActive) return {
+    plane: "rocket", space: true,
+    x: spaceFlight.position.x, y: spaceFlight.position.y, z: spaceFlight.position.z,
+    fx: spaceFlight.forward.x, fy: spaceFlight.forward.y, fz: spaceFlight.forward.z,
+    qx: planeMesh.quaternion.x, qy: planeMesh.quaternion.y,
+    qz: planeMesh.quaternion.z, qw: planeMesh.quaternion.w,
+    motion: Math.abs(spaceFlight.speed), targetName: spaceFlight.targetName,
+  };
+  return { plane: selectedPlane, space: false, lat: plane.latDeg, lon: plane.lonDeg,
+    h: plane.height, heading: plane.heading, pitch: plane.pitch, roll: plane.roll,
+    state: plane.state || "airborne", motion: Math.abs(plane.speed) };
+}
+
+function roundVehiclePayload(seats) {
+  const vehicles = {};
+  for (const id of Object.keys(seats)) vehicles[id] = id === mp.myId ? selectedPlane : mp.players.get(id)?.plane || "pa28";
+  return { vehicles, lockedPlane: mp.lockedPlane, protocolVersion: MULTIPLAYER_PROTOCOL_VERSION };
+}
+
+function createMpStartMessage(fields) {
+  enforceLobbyVehicleLock();
+  const seats = buildSeats();
+  const config = roundVehiclePayload(seats);
+  return { ...fields, roundId: crypto.randomUUID(), seats, ...config,
+    spawnSpacing: multiplayerSpacing(Object.values(config.vehicles).map(key => PLANES[key].wingspan)) };
+}
+
+function usesMultiplayerRoundConfig(id) {
+  return id === mp.myId || supportsMultiplayerRoundConfig(mp.players.get(id)?.protocolVersion);
+}
+
+function sendCompatibilityRoundSpawn(id, payload = mp.goPayload) {
+  const player = mp.players.get(id);
+  if (!mp.host || !player?.inRound || !payload || mp.compatibilityReleased.has(id)) return;
+  const total = Object.keys(mp.seats).length;
+  const spawn = offsetByIndex(mp.truth.lat, mp.truth.lon, mp.seats[id], total);
+  // The public client already supports an authoritative vehicle/position in resume messages.
+  // Use that existing path instead of releasing its stale local selection with a bare "go".
+  const planeKey = player.plane;
+  mp.net?.sendTo(id, { t: "resume", plane: planeKey,
+    pose: { space: false, ...spawn, h: payload.h, heading: payload.heading, pitch: 0, roll: 0,
+      state: "airborne", motion: PLANES[planeKey].cruise },
+    seats: { ...mp.seats }, round: { ...mp.roundStart, ...roundVehiclePayload(mp.seats) } });
+  mp.compatibilityReleased.add(id);
+}
+
 function resumeMultiplayerFlight(data) {
   const pose = data.pose;
   if (!pose || !mp.active || !mp.myId) return false;
@@ -1507,20 +1704,25 @@ function resumeMultiplayerFlight(data) {
     ? { lat: round.lat, lon: round.lon }
     : mp.truth;
   mp.seats = data.seats || mp.seats;
+  mp.spawnSpacing = round.spawnSpacing ?? mp.spawnSpacing;
+  applyRemoteVehicleLock(round);
   mp.roundActive = true;
   mp.inRound = true;
   mp.waiting = false;
   mp.myReady = false;
   mp.goSent = true;
+  stopMultiplayerLoading();
   mp.waitingGo = false;
+  mp.launching = false;
   mp.lastPoseAt = 0;
+  mp.goAt = performance.now();
   mode = "free";
   const baseLat = pose.space ? (mp.truth?.lat ?? startLat) : pose.lat;
   const baseLon = pose.space ? (mp.truth?.lon ?? startLon) : pose.lon;
   beginFlight(baseLat, baseLon);
   pendingSnap = false;
   awaitingSnap = false;
-  paused = false;
+  setPaused(false);
   finishSnapStart();
   if (pose.space) {
     enterSpaceFlight();
@@ -1546,16 +1748,41 @@ function resumeMultiplayerFlight(data) {
     plane.speed = pose.motion || 0;
     if (selectedPlane === "parachutist" && ["airborne", "grounded", "launching"].includes(pose.state)) {
       plane.state = pose.state;
-      if (pose.state === "grounded") groundAlt = pose.h - 0.25;
+      if (pose.state === "grounded") groundAlt = pose.h - PARACHUTIST_GROUND_CLEARANCE;
     }
   }
-  setLobbyStatus("Reconnected at your last position");
+  setLobbyStatus(data.joining ? "Joined near the Admin or an active player" : "Reconnected at your last position");
   return true;
 }
 
 function handleNetData(data, fromId) {
   if (!validMessage(data, mp.host && !!fromId)) return;
+  // Delayed control packets belong to the flight that sent them, not the next
+  // flight using the same connection. Missing ids remain compatible with older clients.
+  if (["snapped", "go", "done", "roundEnd"].includes(data.t)
+    && data.roundId != null && data.roundId !== mp.roundStart?.roundId) return;
   if (mp.host && fromId && data.t !== "hello" && !mp.players.has(fromId)) return;
+  if (mp.host && fromId && data.t === "hello" && mp.players.has(fromId)) {
+    broadcastRoster();
+    return;
+  }
+  if (mp.host && fromId && data.t === "pose") {
+    const player = mp.players.get(fromId);
+    if (!player.inRound || data.plane !== player.plane) return;
+  }
+  if (mp.host && fromId && data.t === "done" && !mp.players.get(fromId)?.inRound) return;
+  if (mp.host && fromId && ["plane", "name", "ready"].includes(data.t)) {
+    const player = mp.players.get(fromId);
+    const rejected = data.t === "plane"
+      ? !canChooseLobbyVehicle(player, mp.lockedPlane)
+      : data.t === "name"
+        ? !canEditLobbyProfile(player)
+        : data.ready && !player.approved;
+    if (rejected) {
+      broadcastRoster();
+      return;
+    }
+  }
   if (mp.host && fromId && data.t === "bye") {
     handlePeerLeft(fromId);
     mp.net?.disconnect?.(fromId);
@@ -1581,23 +1808,27 @@ function handleNetData(data, fromId) {
       id: fromId,
       name,
       resumeKey: data.resumeKey || "",
+      protocolVersion: data.protocolVersion || 0,
       role: normalizedPlayerRole(restored.role),
       approved: restored.role === "leader" || !!restored.approved,
-      plane: record?.pose?.plane || restored.plane || data.plane || "pa28",
+      plane: (!canResume && mp.lockedPlane) || record?.pose?.plane || restored.plane || data.plane || "pa28",
       ready: false,
       muted: !!restored.muted,
       score: restored.score || 0,
       waiting,
       inRound: canResume,
+      presence: data.presence || "active",
     });
     if (canResume) mp.seats[fromId] = restoredSeat(record.seat);
     if (data.resumeKey) mp.departed.delete(data.resumeKey);
     mp.net.sendTo(fromId, {
       t: "welcome",
+      protocolVersion: MULTIPLAYER_PROTOCOL_VERSION,
       id: fromId,
       name,
       roster: rosterPayload(),
       roundActive: mp.roundActive,
+      lockedPlane: mp.lockedPlane,
       mode,
       scope: guessScope,
       city: el.lobbyCity.value,
@@ -1612,7 +1843,10 @@ function handleNetData(data, fromId) {
         text: message.text,
       });
     }
-    if (canResume) mp.net.sendTo(fromId, resumeMessage(record));
+    if (canResume) {
+      mp.net.sendTo(fromId, resumeMessage(record));
+      if (!usesMultiplayerRoundConfig(fromId)) mp.compatibilityReleased.add(fromId);
+    }
     broadcastRoster();
     renderLobby();
     refreshVoice();
@@ -1621,6 +1855,7 @@ function handleNetData(data, fromId) {
     if (data.name) mp.myName = data.name;
     mp.roundActive = !!data.roundActive;
     mp.waiting = !!data.roundActive;
+    applyRemoteVehicleLock(data);
     applyRemoteRegion(data);
     if (data.scope) setLobbyScope(data.scope);
     if (data.mode) selectLobbyMode(data.mode);
@@ -1631,6 +1866,7 @@ function handleNetData(data, fromId) {
     refreshVoice();
   } else if (data.t === "roster") {
     mp.roundActive = !!data.roundActive;
+    applyRemoteVehicleLock(data);
     applyRemoteRegion(data);
     if (data.scope) setLobbyScope(data.scope);
     if (data.mode) selectLobbyMode(data.mode);
@@ -1639,6 +1875,8 @@ function handleNetData(data, fromId) {
     applyLobbySetup();
     renderLobby();
     refreshVoice();
+  } else if (data.t === "presence") {
+    applyPlayerPresence(data.from, data.presence);
   } else if (data.t === "resume") {
     if (mp.host) return;
     resumeMultiplayerFlight(data);
@@ -1657,6 +1895,7 @@ function handleNetData(data, fromId) {
   } else if (data.t === "plane") {
     const id = data.from;
     if (id && mp.players.has(id)) mp.players.get(id).plane = data.plane || "pa28";
+    if (mp.host) broadcastRoster();
     renderLobby();
   } else if (data.t === "name") {
     const id = data.from;
@@ -1696,7 +1935,7 @@ function handleNetData(data, fromId) {
     showLanding();
     if (el.crashNote) {
       el.crashNote.hidden = false;
-      el.crashNote.textContent = `You were removed from the lobby by ${by}.`;
+      el.crashNote.textContent = data.reason || `You were removed from the lobby by ${by}.`;
     }
   } else if (data.t === "ready") {
     const id = data.from;
@@ -1705,6 +1944,7 @@ function handleNetData(data, fromId) {
       joinRoundInProgress(id);
       return;
     }
+    if (mp.host) broadcastRoster();
     renderLobby();
     tryStartMp();
   } else if (data.t === "talk") {
@@ -1716,6 +1956,7 @@ function handleNetData(data, fromId) {
   } else if (data.t === "bump") {
     handleNetworkPlayerBump(data, fromId);
   } else if (data.t === "snapped") {
+    if (mp.host && !mp.players.get(data.from)?.inRound) return;
     if (data.from) {
       mp.snapInfo.set(data.from, {
         h: data.h,
@@ -1726,7 +1967,8 @@ function handleNetData(data, fromId) {
       mp.snapped.add(data.from);
     }
     if (mp.host && mp.goSent && mp.goPayload && data.from) {
-      mp.net?.sendTo(data.from, { t: "go", ...mp.goPayload });
+      if (usesMultiplayerRoundConfig(data.from)) mp.net?.sendTo(data.from, { t: "go", ...mp.goPayload });
+      else sendCompatibilityRoundSpawn(data.from);
     } else if (mp.host) {
       tryReleaseGo();
     }
@@ -1748,7 +1990,9 @@ function handleNetData(data, fromId) {
     startMpFlight(data);
   } else if (data.t === "pose") {
     const id = data.from;
-    if (!id || id === mp.myId) return;
+    const player = mp.players.get(id);
+    if (!id || id === mp.myId || !player || player.inRound === false) return;
+    if (data.presence != null) applyPlayerPresence(id, data.presence);
     pushMatePose(id, data);
     loadMate(id, data.plane || "pa28");
   } else if (data.t === "guess") {
@@ -1758,10 +2002,18 @@ function handleNetData(data, fromId) {
     if (guessOpen) maybeRevealGuesses();
   } else if (data.t === "done") {
     const id = data.from;
-    if (id && mp.players.has(id)) mp.players.get(id).inRound = false;
+    if (id && mp.players.has(id)) {
+      const player = mp.players.get(id);
+      player.inRound = false;
+      player.ready = false;
+      player.waiting = mp.roundActive;
+      retireMultiplayerAvatar(id);
+    }
     if (mp.host) {
       if (mp.rematch.size) abortRematchToLobby();
       else checkRoundClear();
+      tryReleaseGo();
+      broadcastRoster();
     }
     renderLobby();
   } else if (data.t === "roundEnd") {
@@ -1779,7 +2031,8 @@ function handleNetData(data, fromId) {
 
 function handlePeerJoined() {
   if (mp.host) return;
-  mp.net?.send({ t: "hello", name: mp.myName, plane: selectedPlane, resumeKey: mp.resumeKey });
+  mp.net?.send({ t: "hello", protocolVersion: MULTIPLAYER_PROTOCOL_VERSION, name: mp.myName, plane: selectedPlane, resumeKey: mp.resumeKey, presence: currentPlayerPresence() });
+  syncPlayerPresence(true);
 }
 
 function handlePeerLeft(peerId) {
@@ -1788,7 +2041,9 @@ function handlePeerLeft(peerId) {
     mp.talkers.delete(peerId);
     updateVoiceUi();
     mp.contactAt.delete(peerId);
+    mp.contactTracks.delete(peerId);
     mp.bumpRelayAt.delete(peerId);
+    for (const relays of mp.bumpRelayAt.values()) relays.delete(peerId);
   }
   if (!peerId) {
     disposeAllMates();
@@ -1799,6 +2054,7 @@ function handlePeerLeft(peerId) {
     mp.roundActive = false;
     mp.inRound = false;
     mp.waiting = false;
+    mp.lockedPlane = "";
     if (!menuOpen) backToLobby();
     else renderLobby();
     setLobbyStatus("Host left – the room closed", true);
@@ -1811,10 +2067,12 @@ function handlePeerLeft(peerId) {
   mp.guesses.delete(peerId);
   mp.snapInfo.delete(peerId);
   mp.snapped.delete(peerId);
+  mp.compatibilityReleased.delete(peerId);
   delete mp.seats[peerId];
   disposeMate(peerId);
   if (mp.host) {
     checkRoundClear();
+    tryReleaseGo();
     broadcastRoster();
   }
   if (guessOpen) maybeRevealGuesses();
@@ -1837,6 +2095,7 @@ function handleNetError(err) {
 }
 
 function closeRoom() {
+  stopMultiplayerLoading();
   if (mp.active && !mp.host) mp.net?.send({ t: "bye" });
   mp.net?.destroy();
   mp.net = null;
@@ -1849,12 +2108,18 @@ function closeRoom() {
   mp.myMuted = false;
   mp.myReady = false;
   mp.myScore = 0;
+  mp.lastPresenceSent = null;
+  mp.lockedPlane = "";
+  mp.spawnSpacing = null;
+  mp.compatibilityReleased.clear();
   mp.waiting = false;
   mp.inRound = false;
   mp.roundActive = false;
   mp.chat.length = 0;
   mp.bumpRelayAt.clear();
   mp.contactAt.clear();
+  mp.contactTracks.clear();
+  showMultiplayerNotice("");
   mp.players.clear();
   mp.departed.clear();
   mp.kicked.clear();
@@ -1862,6 +2127,10 @@ function closeRoom() {
   mp.poses.clear();
   mp.seats = {};
   mp.roundStart = null;
+  mp.goSent = false;
+  mp.waitingGo = false;
+  mp.loadingStartedAt = 0;
+  mp.lastSnapAt = 0;
   mp.goPayload = null;
   mp.snapInfo.clear();
   mp.rematch.clear();
@@ -1948,15 +2217,48 @@ function tryStartMp() {
 
 function joinRoundInProgress(playerId) {
   if (!mp.host || !mp.roundActive || !mp.roundStart || !playerId) return false;
-  const player = mp.players.get(playerId);
+  const isSelf = playerId === mp.myId;
+  const player = isSelf
+    ? { approved: mp.myApproved, inRound: mp.inRound, plane: selectedPlane }
+    : mp.players.get(playerId);
   if (!player?.approved || player.inRound) return false;
-  const occupied = Object.values(mp.seats).filter(Number.isFinite);
-  const seat = occupied.length ? Math.max(...occupied) + 1 : 0;
+  if (mp.lockedPlane) player.plane = mp.lockedPlane;
+  // Find a living anchor before marking the returning Admin as in-round;
+  // otherwise their own crash position would become the preferred anchor.
+  const anchors = [isSelf ? null : currentLocalPlayerPose(),
+    ...otherPlayers().filter(p => p.inRound && p.id !== playerId).map(p => latestPlayerPose(p.id))];
+  const anchor = anchors.find(pose => pose && (!pose.space || player.plane === "rocket"));
+  if (isSelf && (!mp.goSent || (!anchor && !mp.goPayload))) return false;
+  const seat = restoredSeat();
   mp.seats[playerId] = seat;
   player.ready = false;
   player.waiting = false;
   player.inRound = true;
-  mp.net?.sendTo(playerId, { ...mp.roundStart, seats: { ...mp.seats } });
+  const round = { ...mp.roundStart, ...roundVehiclePayload(mp.seats) };
+  if (mp.goSent && (anchor || mp.goPayload)) {
+    const spawn = offsetByIndex(mp.roundStart.lat, mp.roundStart.lon, seat, Object.keys(mp.seats).length);
+    const pose = anchor ? nearbyPlayerPose(anchor, seat, mp.spawnSpacing || 20)
+      : { space: false, lat: spawn.lat, lon: spawn.lon, h: mp.goPayload.h, heading: mp.goPayload.heading,
+        pitch: 0, roll: 0, state: "airborne", motion: PLANES[player.plane].cruise };
+    pose.space = !!pose.space;
+    if (!pose.space && anchor && anchor.plane !== player.plane) {
+      pose.state = "airborne";
+      pose.motion = PLANES[player.plane].cruise;
+      pose.pitch = 0;
+      pose.roll = 0;
+      if (anchor.state === "grounded" && player.plane !== "parachutist") {
+        pose.h = anchor.h - PARACHUTIST_GROUND_CLEARANCE + 320;
+      }
+    }
+    const message = { t: "resume", joining: true, plane: player.plane, pose, round, seats: { ...mp.seats } };
+    if (isSelf) resumeMultiplayerFlight(message);
+    else {
+      mp.net?.sendTo(playerId, message);
+      if (!usesMultiplayerRoundConfig(playerId)) mp.compatibilityReleased.add(playerId);
+    }
+  } else {
+    mp.net?.sendTo(playerId, { ...round, seats: { ...mp.seats } });
+  }
   broadcastRoster();
   renderLobby();
   return true;
@@ -1972,7 +2274,7 @@ async function launchMpRound() {
       const scope = GUESS_SCOPES[guessScope];
       setLobbyStatus(scope.status);
       const p = pickGuessStart(guessScope);
-      const msg = { t: "start", mode, lat: p.lat, lon: p.lon, scope: guessScope, seats: buildSeats(), ...regionPayload() };
+      const msg = createMpStartMessage({ t: "start", mode, lat: p.lat, lon: p.lon, scope: guessScope, ...regionPayload() });
       mp.net?.send(msg);
       startMpFlight(msg);
     } else if (mode === "home") {
@@ -1994,15 +2296,14 @@ async function launchMpRound() {
         return;
       }
       const start = offsetPoint(loc.lat, loc.lon, 20 + Math.random() * 10);
-      const msg = {
+      const msg = createMpStartMessage({
         t: "start",
         mode,
         lat: start.lat,
         lon: start.lon,
         homeLat: loc.lat,
         homeLon: loc.lon,
-        seats: buildSeats(),
-      };
+      });
       mp.net?.send(msg);
       startMpFlight(msg);
     } else {
@@ -2016,7 +2317,7 @@ async function launchMpRound() {
         el.lobbyStart.disabled = false;
         return;
       }
-      const msg = { t: "start", mode, lat: loc.lat, lon: loc.lon, seats: buildSeats() };
+      const msg = createMpStartMessage({ t: "start", mode, lat: loc.lat, lon: loc.lon });
       mp.net?.send(msg);
       startMpFlight(msg);
     }
@@ -2115,13 +2416,14 @@ function seedAllMates(h) {
   if (lat0 == null || lon0 == null) return;
   const total = Object.keys(mp.seats).length || 1;
   for (const [id, seat] of Object.entries(mp.seats)) {
-    if (id === mp.myId) continue;
+    if (id === mp.myId || mp.players.get(id)?.inRound === false) continue;
     const spawn = offsetByIndex(lat0, lon0, Number(seat), total);
     seedMatePose(id, spawn.lat, spawn.lon, h, mp.players.get(id)?.plane || "pa28");
   }
 }
 
 function multiplayerSpawnSpacing() {
+  if (mp.roundActive && mp.spawnSpacing) return mp.spawnSpacing;
   let widest = PLANES[selectedPlane]?.wingspan || 9;
   for (const player of mp.players.values()) {
     if (player.inRound || !mp.roundActive) {
@@ -2132,14 +2434,7 @@ function multiplayerSpawnSpacing() {
 }
 
 function offsetByIndex(lat, lon, index, total) {
-  if (total <= 1) return { lat, lon };
-  const spacingM = multiplayerSpawnSpacing();
-  const dE = (index - (total - 1) / 2) * spacingM;
-  const R = 6378137;
-  return {
-    lat,
-    lon: lon + (dE / (R * Math.cos((lat * Math.PI) / 180))) * (180 / Math.PI),
-  };
+  return multiplayerSpawnPoint(lat, lon, index, total, multiplayerSpawnSpacing());
 }
 
 function markRoundStarted(seats) {
@@ -2155,6 +2450,10 @@ function markRoundStarted(seats) {
 }
 
 async function startMpFlight(msg) {
+  stopMultiplayerLoading();
+  applyRemoteVehicleLock(msg);
+  const ownPlane = msg.vehicles?.[mp.myId] || msg.lockedPlane;
+  if (PLANES[ownPlane] && ownPlane !== selectedPlane) selectPlane(PLANE_ORDER.indexOf(ownPlane), 0, true);
   const { seats: _initialSeats, ...roundStart } = msg;
   mp.roundStart = roundStart;
   mode = "free";
@@ -2165,11 +2464,16 @@ async function startMpFlight(msg) {
   mp.poseSeq = 0;
   mp.truth = { lat: msg.lat, lon: msg.lon };
   mp.seats = msg.seats || {};
+  mp.spawnSpacing = msg.spawnSpacing || multiplayerSpacing(Object.values(msg.vehicles || {}).map(key => PLANES[key].wingspan));
   mp.snapped = new Set();
+  mp.compatibilityReleased.clear();
   mp.snapInfo.clear();
   mp.rematch.clear();
   mp.goSent = false;
+  mp.goPayload = null;
   mp.waitingGo = false;
+  mp.loadingStartedAt = performance.now();
+  mp.lastSnapAt = 0;
   mp.launching = false;
   mp.goAt = 0;
   markRoundStarted(mp.seats);
@@ -2177,6 +2481,7 @@ async function startMpFlight(msg) {
   timeLeft = mode === "guess" ? GUESS_TIME : mode === "home" ? HOME_TIME : 0;
   timerActive = false;
   menuOpen = true;
+  setPaused(false);
   guessOpen = false;
   crashed = false;
   finished = false;
@@ -2191,17 +2496,21 @@ async function startMpFlight(msg) {
   const spawn = offsetByIndex(msg.lat, msg.lon, seat, total);
   if (selectedPlane !== planeMesh?.userData?.key) loadPlane(selectedPlane);
   beginFlight(spawn.lat, spawn.lon);
+  // Synchronization must also run when a background tab stops rendering frames.
+  mp.loadingTimer = setInterval(updateMultiplayerLoading, 500);
   seedAllMates(plane.height);
   if (mode === "home" && homeTarget) placeBeaconAt(homeTarget.lat, homeTarget.lon);
   if (mp.host) {
     broadcastRoster();
-    const releaseIfSnapped = () => {
-      if (!mp.host || !mp.roundActive || mp.goSent) return;
-      if ([...mp.snapInfo.values()].some(isTerrainSnap)) applyGo();
-    };
-    setTimeout(releaseIfSnapped, 12000);
-    setTimeout(releaseIfSnapped, 22000);
   }
+}
+
+function sendTerrainSnap() {
+  const info = mp.snapInfo.get(mp.myId);
+  if (!info) return;
+  mp.lastSnapAt = performance.now();
+  mp.net?.send({ t: "snapped", from: mp.myId, ...info,
+    ...(mp.roundStart?.roundId ? { roundId: mp.roundStart.roundId } : {}) });
 }
 
 function reportSnapped() {
@@ -2216,7 +2525,7 @@ function reportSnapped() {
     probed: snapLastGh !== null,
   };
   mp.snapInfo.set(mp.myId, info);
-  mp.net?.send({ t: "snapped", from: mp.myId, ...info });
+  sendTerrainSnap();
   if (mp.host) {
     mp.snapped.add(mp.myId);
     tryReleaseGo();
@@ -2224,11 +2533,40 @@ function reportSnapped() {
 }
 
 function tryReleaseGo() {
-  if (!mp.host || mp.goSent) return;
-  const need = Object.keys(mp.seats || {});
-  if (!need.length || !need.every((id) => mp.snapped.has(id))) return;
+  if (!mp.host || !mp.roundActive || !mp.roundStart || mp.goSent) return;
+  // Legacy clients receive their final vehicle and spawn together after terrain is measured.
+  const participants = Object.keys(mp.seats || {}).filter(id => id === mp.myId ? mp.inRound : mp.players.get(id)?.inRound);
+  const need = participants.filter(usesMultiplayerRoundConfig);
+  if (!participants.length || !need.every((id) => mp.snapped.has(id))) return;
   if (![...mp.snapInfo.values()].some(isTerrainSnap)) return;
   applyGo();
+}
+
+function updateMultiplayerLoading() {
+  if (!mp.active || !mp.roundActive || !mp.roundStart || mp.goSent || (!mp.host && !mp.inRound)) {
+    stopMultiplayerLoading();
+    return;
+  }
+  const now = performance.now();
+  if (mp.inRound && mp.waitingGo && now - mp.lastSnapAt >= 1000) sendTerrainSnap();
+  if (mp.host) {
+    tryReleaseGo();
+    // Check recovery against this round's clock, rather than two old timeout
+    // callbacks that can miss late terrain or fire during a different flight.
+    if (!mp.goSent && now - mp.loadingStartedAt >= 12000
+      && [...mp.snapInfo.values()].some(isTerrainSnap)) applyGo();
+  }
+  if (!mp.inRound || mp.goSent || el.mpWait.classList.contains("hidden")) return;
+  const participants = rosterPayload().filter(player => player.inRound);
+  const pending = participants.filter(player => !isTerrainSnap(mp.snapInfo.get(player.id)));
+  const text = `Loading terrain… ready ${participants.length - pending.length}/${participants.length}`
+    + (pending.length ? ` · Waiting for: ${pending.slice(0, 4).map(player => player.name).join(", ")}${pending.length > 4 ? "…" : ""}` : " · Synchronizing start…");
+  if (el.mpWaitText.textContent !== text) el.mpWaitText.textContent = text;
+}
+
+function stopMultiplayerLoading() {
+  if (mp.loadingTimer != null) clearInterval(mp.loadingTimer);
+  mp.loadingTimer = null;
 }
 
 function snapAgl() {
@@ -2246,7 +2584,6 @@ function isTerrainSnap(s) {
   if (s.probed === false) return false;
   const agl = s.h - s.gh;
   if (agl < 60 || agl > 500) return false;
-  if (Math.abs(s.h - spawnHoldAlt()) < 300) return false;
   return true;
 }
 
@@ -2259,15 +2596,28 @@ function buildGoPayload() {
 }
 
 function applyGo(msg) {
-  if (mp.goSent) return;
+  if (!mp.active || !mp.roundActive || !mp.roundStart || mp.goSent || (!mp.host && !mp.inRound)) return;
   const payload = msg && Number.isFinite(msg.h)
     ? { h: msg.h, gh: msg.gh, heading: msg.heading ?? 0 }
     : buildGoPayload();
   if (!payload) return;
+  if (mp.roundStart.roundId) payload.roundId = mp.roundStart.roundId;
   mp.goPayload = payload;
   mp.goSent = true;
+  stopMultiplayerLoading();
   mp.waitingGo = false;
-  if (mp.host) mp.net?.send({ t: "go", ...payload });
+  if (mp.host) for (const id of Object.keys(mp.seats)) {
+    if (id === mp.myId) continue;
+    if (usesMultiplayerRoundConfig(id)) mp.net?.sendTo(id, { t: "go", ...payload });
+    else sendCompatibilityRoundSpawn(id, payload);
+  }
+  // The Admin coordinates the room even after leaving their own flight.
+  // Release the other participants without teleporting the Admin out of the lobby.
+  if (!mp.inRound) {
+    hideMpWait();
+    renderLobby();
+    return;
+  }
   pendingSnap = false;
   awaitingSnap = false;
   if (plane && payload.h != null) {
@@ -2291,32 +2641,65 @@ function applyGo(msg) {
   finishSnapStart();
 }
 
-function leaveRound() {
+function retireMultiplayerAvatar(id) {
+  mp.poses.delete(id);
+  mp.snapped.delete(id);
+  mp.snapInfo.delete(id);
+  mp.compatibilityReleased.delete(id);
+  mp.rematch.delete(id);
+  mp.talkers.delete(id);
+  mp.contactAt.delete(id);
+  mp.contactTracks.delete(id);
+  mp.bumpRelayAt.delete(id);
+  for (const relays of mp.bumpRelayAt.values()) relays.delete(id);
+  delete mp.seats[id];
+  disposeMate(id);
+}
+
+function leaveRound(reason = "") {
   const wasIn = mp.inRound;
   mp.inRound = false;
   mp.myReady = false;
-  if (wasIn) mp.net?.send({ t: "done", from: mp.myId });
-  if (mp.host) {
+  mp.waiting = mp.roundActive;
+  retireMultiplayerAvatar(mp.myId);
+  if (wasIn) mp.net?.send({ t: "done", from: mp.myId, ...(reason ? { reason } : {}),
+    ...(mp.roundStart?.roundId ? { roundId: mp.roundStart.roundId } : {}) });
+  if (mp.host && wasIn) {
     if (mp.rematch.size) abortRematchToLobby();
     else checkRoundClear();
+    tryReleaseGo();
+    broadcastRoster();
   }
 }
 
 function checkRoundClear() {
-  if (!mp.host) return;
+  if (!mp.host || !mp.roundActive) return;
   if (mp.inRound || otherPlayers().some((p) => p.inRound)) return;
+  const roundId = mp.roundStart?.roundId;
   finishRoomRound();
-  mp.net?.send({ t: "roundEnd" });
+  mp.net?.send({ t: "roundEnd", ...(roundId ? { roundId } : {}) });
   broadcastRoster();
 }
 
 function finishRoomRound() {
+  stopMultiplayerLoading();
+  awaitingSnap = false;
+  pendingSnap = false;
   mp.roundActive = false;
   mp.inRound = false;
   mp.waiting = false;
   mp.myReady = false;
   mp.roundStart = null;
+  mp.goSent = false;
+  mp.waitingGo = false;
+  mp.goAt = 0;
   mp.goPayload = null;
+  mp.loadingStartedAt = 0;
+  mp.lastSnapAt = 0;
+  mp.seats = {};
+  mp.snapped.clear();
+  mp.spawnSpacing = null;
+  mp.compatibilityReleased.clear();
   for (const p of mp.players.values()) {
     p.waiting = false;
     p.inRound = false;
@@ -2338,6 +2721,7 @@ function finishRoomRound() {
 
 function showMpWait(text) {
   if (text) el.mpWaitText.textContent = text;
+  if (el.mpWaitLobby) el.mpWaitLobby.hidden = !mp.active || !mp.roundActive || mp.launching;
   el.mpWait.classList.remove("hidden");
 }
 
@@ -2376,8 +2760,9 @@ function tryLaunchRematch() {
 
 function abortRematchToLobby() {
   if (!mp.host) return;
+  const roundId = mp.roundStart?.roundId;
   finishRoomRound();
-  mp.net?.send({ t: "roundEnd" });
+  mp.net?.send({ t: "roundEnd", ...(roundId ? { roundId } : {}) });
   broadcastRoster();
 }
 
@@ -2385,14 +2770,17 @@ function backToLobby() {
   releaseLandscapeView();
   hideBanner();
   menuOpen = true;
+  setPaused(false);
   timerActive = false;
   guessOpen = false;
   awaitingSnap = false;
+  pendingSnap = false;
   crashed = false;
   finished = false;
   beacon.visible = false;
   el.guessmap.classList.remove("show");
   leaveRound();
+  hideMpWait();
   if (planeMesh) planeMesh.visible = true;
   showLobby();
 }
@@ -2404,6 +2792,10 @@ function setLobbyScope(scope, broadcast = false) {
   );
   if (broadcast && mp.host && mp.net) mp.net.send({ t: "scope", scope, ...regionPayload() });
 }
+
+el.mpWaitLobby?.addEventListener("click", () => {
+  if (mp.active && mp.roundActive && !mp.launching) backToLobby();
+});
 document.querySelectorAll("#lobby-scopes .scope-btn").forEach((btn) => {
   btn.addEventListener("click", () => {
     if (!mp.host) return;
@@ -2631,10 +3023,14 @@ function createMateLabel(id) {
   mic.textContent = "🎙";
   mic.setAttribute("aria-hidden", "true");
   mic.hidden = true;
-  label.append(role, name, mic);
+  const presence = document.createElement("span");
+  presence.className = "mate-label-presence";
+  presence.hidden = true;
+  label.append(role, name, mic, presence);
   label._name = name;
   label._role = role;
   label._mic = mic;
+  label._presence = presence;
   el.banner?.parentElement?.append(label);
   return label;
 }
@@ -2679,18 +3075,35 @@ function updateMateLabels() {
     label._role.classList.toggle("leader", role === "leader");
     label._mic.hidden = !talking;
     label.classList.toggle("talking", talking);
+    const presence = player?.presence || "active";
+    const presenceCopy = PLAYER_PRESENCE_LABELS[presence] || "";
+    if (label._presence.textContent !== presenceCopy) label._presence.textContent = presenceCopy;
+    label._presence.hidden = !presenceCopy;
+    label._presence.dataset.presence = presence;
+    label.classList.toggle("has-presence", !!presenceCopy);
     const roleCopy = role === "player" ? "" : `, ${PLAYER_ROLE_LABELS[role]}`;
-    label.setAttribute("aria-label", talking ? `${name}${roleCopy} is talking` : `${name}${roleCopy}`);
+    label.setAttribute("aria-label", `${name}${roleCopy}${talking ? " is talking" : ""}${presenceCopy ? `, ${presenceCopy}` : ""}`);
     mateUp.set(0, 1, 0).applyQuaternion(mate.mesh.quaternion).normalize();
-    const labelHeight = Math.max(5, (PLANES[mate.key]?.wingspan || 9) * 0.58);
+    // Anchor to the character's head, not five metres above a walking player.
+    // Space models are scaled down, so the anchor must use the same scale.
+    const labelHeight = (mate.key === "parachutist" ? 2.2
+      : Math.max(2, (PLANES[mate.key]?.wingspan || 9) * 0.12 + 1.2)) * (mate.mesh.scale.y || 1);
     mateLabelPos.copy(mate.mesh.position).addScaledVector(mateUp, labelHeight).project(camera);
     const visible = mateLabelPos.z >= -1 && mateLabelPos.z <= 1
       && mateLabelPos.x >= -1.15 && mateLabelPos.x <= 1.15
       && mateLabelPos.y >= -1.15 && mateLabelPos.y <= 1.15;
     label.hidden = !visible;
     if (!visible) continue;
-    const x = rect.left + (mateLabelPos.x * 0.5 + 0.5) * rect.width;
-    const y = rect.top + (-mateLabelPos.y * 0.5 + 0.5) * rect.height;
+    const sizeKey = `${name}|${role}|${talking}|${presence}|${rect.width}`;
+    if (label._sizeKey !== sizeKey) {
+      label._sizeKey = sizeKey;
+      label._width = label.offsetWidth;
+      label._height = label.offsetHeight;
+    }
+    const x = Math.max(rect.left + label._width / 2 + 8,
+      Math.min(rect.right - label._width / 2 - 8, rect.left + (mateLabelPos.x * 0.5 + 0.5) * rect.width));
+    const y = Math.max(rect.top + label._height * 1.15 + 8,
+      Math.min(rect.bottom - 8, rect.top + (-mateLabelPos.y * 0.5 + 0.5) * rect.height));
     label.style.transform = `translate3d(${x}px, ${y}px, 0) translate(-50%, -115%)`;
   }
 }
@@ -2785,6 +3198,7 @@ function resetFlight(latDeg, lonDeg) {
   groundContact.reset();
   wingContact.reset();
   mp.contactAt.clear();
+  mp.contactTracks.clear();
   playerInteractionVelocity.set(0, 0, 0);
   multiplayerSupportSurface = null;
   multiplayerSupportRootHeight = null;
@@ -2871,14 +3285,19 @@ function wingHit() {
 }
 
 function crash() {
+  if (crashed) return;
   crashed = true;
   explosions.push(createExplosion(scene, planePos.clone()));
   playExplosionSound();
   shake = 1;
   if (planeMesh) planeMesh.visible = false;
+  if (mp.active) leaveRound("crashed");
   if (mp.active && mode === "guess") return; // runda trwa — po minucie i tak zgadujecie
   timerActive = false;
-  setTimeout(() => showBanner("YOU CRASHED"), 900);
+  const crashedVehicle = plane;
+  setTimeout(() => {
+    if (crashed && !menuOpen && plane === crashedVehicle) showBanner("YOU CRASHED");
+  }, 900);
 }
 
 function placeBeaconAt(latDeg, lonDeg) {
@@ -3024,6 +3443,10 @@ el.lobbyPlayers.addEventListener("submit", (event) => {
   renamePlayer(form.dataset.playerId, form.elements.nickname?.value);
 });
 el.lobbyPlayers.addEventListener("click", (event) => {
+  if (event.target.closest("#lobby-vehicle-lock")) {
+    toggleLobbyVehicleLock();
+    return;
+  }
   const leaderButton = event.target.closest(".leader-toggle");
   if (leaderButton) {
     toggleLobbyLeader(leaderButton.dataset.playerId);
@@ -3080,8 +3503,16 @@ el.lobbyStart.addEventListener("click", () => {
       setLobbyStatus("Awaiting approval from an Admin or Leader", true);
       return;
     }
+    if (mp.host) {
+      if (!joinRoundInProgress(mp.myId)) {
+        renderLobby();
+        setLobbyStatus("The current game has not finished loading yet. Try joining again shortly.", true);
+      }
+      return;
+    }
     mp.myReady = true;
     mp.net?.send({ t: "ready", ready: true, from: mp.myId });
+    renderLobby();
     el.lobbyStart.disabled = true;
     setLobbyStatus("Joining the current game…");
     return;
@@ -3092,10 +3523,6 @@ el.lobbyStart.addEventListener("click", () => {
   }
   if (!mp.myApproved) {
     setLobbyStatus("Awaiting approval from an Admin or Leader", true);
-    return;
-  }
-  if (playablePlayers().length < 2) {
-    setLobbyStatus("Wait until someone joins from the link first", true);
     return;
   }
   mp.myReady = !mp.myReady;
@@ -3121,6 +3548,7 @@ function setPaused(v) {
   keys.clear();
   resetStick(); touch.boost = false; touch.brake = false;
   el.pause.classList.toggle("show", v);
+  syncPlayerPresence();
 }
 
 el.resume.addEventListener("click", () => setPaused(false));
@@ -3365,13 +3793,21 @@ window.addEventListener("keyup", (e) => {
   if (k === "t") stopTalk();
   keys.delete(k);
 });
-window.addEventListener('blur', clearFlightInput);
+window.addEventListener('blur', () => {
+  gameAway = true;
+  clearFlightInput();
+  syncPlayerPresence();
+});
 window.addEventListener('focus', () => {
+  gameAway = false;
   if (streetModeActive && externalStreetWindow?.closed) leaveStreetView();
+  syncPlayerPresence();
 });
 document.addEventListener('visibilitychange', () => {
+  gameAway = document.hidden || !document.hasFocus();
   if (document.hidden) clearFlightInput();
   else if (streetModeActive && externalStreetWindow?.closed) leaveStreetView();
+  syncPlayerPresence();
 });
 window.addEventListener('pagehide', () => {
   if (mp.active && !mp.host) mp.net?.send({ t: "bye" });
@@ -3614,6 +4050,7 @@ function sendSpacePose(now = performance.now()) {
     seq: mp.poseSeq,
     at: now,
     plane: "rocket",
+    presence: currentPlayerPresence(),
     space: true,
     x: spaceFlight.position.x,
     y: spaceFlight.position.y,
@@ -3641,6 +4078,10 @@ function renderSpaceMates(dt) {
   const renderAt = performance.now() - MATE_INTERP_MS;
   for (const [id, track] of mp.poses) {
     if (id === mp.myId) continue;
+    if (mp.players.get(id)?.inRound === false) {
+      retireMultiplayerAvatar(id);
+      continue;
+    }
     const samples = track.samples;
     const latest = samples?.[samples.length - 1];
     if (!latest?.space) {
@@ -3896,6 +4337,7 @@ function triggerSpaceImpact(title, message) {
   spaceFlight.speed = 0;
   spaceFlight.hyperdrive = false;
   if (planeMesh) planeMesh.visible = false;
+  if (mp.active) leaveRound("crashed");
   document.body.classList.remove("hyperdrive");
   showBanner(title, message);
 }
@@ -4546,6 +4988,10 @@ const playerInteractionVelocity = new Vector3();
 const playerInteractionDelta = new Vector3();
 const playerInteractionNormal = new Vector3();
 const playerInteractionHorizontal = new Vector3();
+const playerInteractionImpulse = new Vector3();
+const playerInteractionLevelDelta = new Vector3();
+const playerInteractionLevelQuat = new Quaternion();
+const playerInteractionLevelInverse = new Quaternion();
 const playerInteractionUp = new Vector3();
 const playerInteractionPoint = new Vector3();
 const playerInteractionLocal = new Vector3();
@@ -4691,21 +5137,24 @@ function sendPlayerBump(targetId, impulse) {
 }
 
 function handleNetworkPlayerBump(data, fromId) {
-  if (!mp.inRound || menuOpen || paused || crashed || finished || spaceModeActive) return;
+  if (!mp.active || !mp.roundActive) return;
   const targetId = String(data.target || "");
   if (mp.host) {
     const sourceId = String(fromId || data.from || "");
-    if (!sourceId || sourceId === targetId || !mp.players.has(sourceId)) return;
-    if (targetId !== mp.myId && !mp.players.has(targetId)) return;
+    if (!sourceId || sourceId === targetId || !mp.players.get(sourceId)?.inRound) return;
+    if (targetId === mp.myId ? !mp.inRound : !mp.players.get(targetId)?.inRound) return;
     const now = performance.now();
-    if (now - (mp.bumpRelayAt.get(sourceId) || -Infinity) < PLAYER_BUMP_RELAY_COOLDOWN_MS) return;
+    const relays = mp.bumpRelayAt.get(sourceId) || new Map();
+    if (now - (relays.get(targetId) || -Infinity) < PLAYER_BUMP_RELAY_COOLDOWN_MS) return;
     if (!bumpParticipantsNearby(sourceId, targetId)) return;
-    mp.bumpRelayAt.set(sourceId, now);
+    relays.set(targetId, now);
+    mp.bumpRelayAt.set(sourceId, relays);
     const payload = { ...data, from: sourceId, target: targetId };
     if (targetId === mp.myId) applySoftPlayerBump(payload);
     else mp.net?.sendTo(targetId, payload);
     return;
   }
+  if (!mp.inRound) return;
   const sourceId = String(data.from || "");
   if (targetId !== mp.myId || !sourceId || sourceId === mp.myId || !mp.players.has(sourceId)) return;
   if (!bumpParticipantsNearby(sourceId, mp.myId)) return;
@@ -4719,21 +5168,28 @@ function updateMultiplayerPlayerInteractions(now, active) {
   multiplayerSupportRootHeight = null;
   multiplayerSupportedBy = "";
   if (!active || !mp.active || !mp.inRound || !mp.goAt
-    || now - mp.goAt < PLAYER_INTERACTION_START_DELAY_MS) return;
+    || now - mp.goAt < PLAYER_INTERACTION_START_DELAY_MS) {
+    mp.contactTracks.clear();
+    return;
+  }
 
   let supportRoot = -Infinity;
   let supportId = "";
-  playerInteractionUp.copy(planePos).normalize();
+  frameAt(plane.lat, plane.lon, plane.height, 0, 0, 0, playerInteractionFrame)
+    .decompose(playerInteractionPoint, playerInteractionLevelQuat, playerInteractionScale);
+  playerInteractionLevelInverse.copy(playerInteractionLevelQuat).invert();
+  playerInteractionUp.set(0, 1, 0).applyQuaternion(playerInteractionLevelQuat);
   for (const [id, mate] of mp.mates) {
     if (!id || id === mp.myId || !mate?.mesh?.visible || !Number.isFinite(mate.interactionHeight)) continue;
-    if (now - (mate.interactionAt || 0) > PLAYER_POSE_STALE_MS) continue;
+    const remoteActive = !["paused", "afk", "street-view"].includes(mp.players.get(id)?.presence);
+    if (remoteActive && now - (mate.interactionAt || 0) > PLAYER_POSE_STALE_MS) continue;
     playerInteractionDelta.copy(planePos).sub(mate.mesh.position);
     const verticalDelta = playerInteractionDelta.dot(playerInteractionUp);
     playerInteractionHorizontal.copy(playerInteractionDelta)
       .addScaledVector(playerInteractionUp, -verticalDelta);
     const horizontalDistance = playerInteractionHorizontal.length();
     const remoteKey = mate.key || mp.players.get(id)?.plane || "pa28";
-    const contact = classifyPlayerContact({
+    const options = {
       localKey: selectedPlane,
       localState: plane.state || "airborne",
       localWingspan: PLANES[selectedPlane]?.wingspan,
@@ -4744,7 +5200,17 @@ function updateMultiplayerPlayerInteractions(now, active) {
       verticalDelta,
       localMotion: Math.abs(plane.speed || 0),
       remoteMotion: Math.abs(mate.interactionMotion || 0),
-    });
+    };
+    playerInteractionLevelDelta.copy(playerInteractionDelta).applyQuaternion(playerInteractionLevelInverse);
+    const previous = mp.contactTracks.get(id);
+    let contact = classifyPlayerContact(options);
+    if (!contact && previous && now - previous.at <= 150
+      && playerInteractionLevelDelta.distanceToSquared(previous.delta) < 250 * 250) {
+      contact = sweptPlayerContact(options, previous.delta, playerInteractionLevelDelta);
+      if (contact) playerInteractionHorizontal.copy(previous.delta)
+        .setY(0).applyQuaternion(playerInteractionLevelQuat);
+    }
+    mp.contactTracks.set(id, { at: now, delta: playerInteractionLevelDelta.clone() });
     if (!contact) continue;
 
     if (contact.type === "support" && selectedPlane === "parachutist") {
@@ -4759,20 +5225,32 @@ function updateMultiplayerPlayerInteractions(now, active) {
       continue;
     }
 
-    if (contact.type !== "push" || String(mp.myId).localeCompare(String(id)) >= 0) continue;
+    if (contact.type !== "push") continue;
+    const normalLength = playerInteractionHorizontal.length();
+    if (normalLength > 0.001) playerInteractionNormal.copy(playerInteractionHorizontal).multiplyScalar(1 / normalLength);
+    else playerInteractionNormal.set(String(mp.myId).localeCompare(String(id)) < 0 ? 1 : -1, 0, 0)
+      .applyQuaternion(playerInteractionLevelQuat);
+    // Resolve overlap on each moving client, independently of which peer sends
+    // the impulse. Paused characters remain solid instead of disabling contact.
+    if (!contact.swept) {
+      const correction = Math.min(contact.walking ? 0.35 : 1.5, contact.penetration * (remoteActive ? 0.5 : 1));
+      playerInteractionImpulse.copy(playerInteractionNormal).multiplyScalar(correction);
+      moveVehicleByWorldDelta(playerInteractionImpulse);
+    }
+    if (remoteActive && String(mp.myId).localeCompare(String(id)) >= 0) continue;
     if (now - (mp.contactAt.get(id) || -Infinity) < PLAYER_CONTACT_COOLDOWN_MS) continue;
     mp.contactAt.set(id, now);
-    if (horizontalDistance > 0.001) playerInteractionNormal.copy(playerInteractionHorizontal).multiplyScalar(1 / horizontalDistance);
-    else playerInteractionNormal.set(1, 0, 0).applyQuaternion(planeQuat);
     const share = contact.walking ? 0.68 : 0.55;
-    playerInteractionDelta.copy(playerInteractionNormal).multiplyScalar(contact.strength * share);
+    // applySoftPlayerBump mutates its scratch vector. Keep the outgoing impulse
+    // separate so the other participant receives the full reaction, not 1/40.
+    playerInteractionImpulse.copy(playerInteractionNormal).multiplyScalar(contact.strength * share);
     applySoftPlayerBump({
-      ix: playerInteractionDelta.x,
-      iy: playerInteractionDelta.y,
-      iz: playerInteractionDelta.z,
+      ix: playerInteractionImpulse.x,
+      iy: playerInteractionImpulse.y,
+      iz: playerInteractionImpulse.z,
     });
-    playerInteractionDelta.multiplyScalar(-1);
-    sendPlayerBump(id, playerInteractionDelta);
+    playerInteractionImpulse.multiplyScalar(-1);
+    sendPlayerBump(id, playerInteractionImpulse);
   }
 
   if (supportId) {
@@ -4787,6 +5265,10 @@ function updateMultiplayerPlayerInteractions(now, active) {
     plane.groundHeight = null;
     plane.groundClearance = Infinity;
   }
+  const matrix = frameAt(plane.lat, plane.lon, plane.height, plane.heading, plane.pitch, -plane.roll, planeFrameMatrix);
+  matrix.decompose(planePos, planeQuat, planeMesh.scale);
+  planeMesh.position.copy(planePos);
+  planeMesh.quaternion.copy(planeQuat);
 }
 
 const adaptiveQuality = new AdaptiveQuality();
@@ -4833,6 +5315,7 @@ function showStreetPrompt() {
 async function enterStreetView() {
   if (!plane || plane.state !== "grounded") return;
   el.streetPrompt.close();
+  streetViewWasPaused = paused;
   externalStreetWindow = window.open(
     streetViewUrl(plane.latDeg, plane.lonDeg, plane.headingDeg),
     "fotw-street-view",
@@ -4846,6 +5329,7 @@ async function enterStreetView() {
   }
   try { externalStreetWindow.opener = null; } catch { /* cross-origin protection */ }
   streetModeActive = true;
+  syncPlayerPresence();
   keys.clear();
   el.streetView.innerHTML = '<div class="street-external-card"><strong>Street View is open in another window</strong><span>Close Google Maps or return here and use the visible Return to game button. Your landing point is preserved.</span></div>';
   el.streetModeStatus.textContent = "Close Google Maps or tap Return to game. Escape and Space also work while this game tab is active.";
@@ -4863,6 +5347,7 @@ function leaveStreetView() {
   el.streetView.replaceChildren();
   keys.clear();
   renderer?.domElement?.focus?.();
+  setPaused(streetViewWasPaused);
 }
 
 streetViewLink.addEventListener("click", showStreetPrompt);
@@ -5009,12 +5494,17 @@ function animate(now = performance.now()) {
   }
 }
 
-function tickFrame() {
+function tickFrame(testDt = null) {
+  // A cross-origin popup can sever its window proxy; only check it after returning to the game.
+  if (streetModeActive && !gameAway && document.hasFocus() && externalStreetWindow?.closed) leaveStreetView();
+  syncPlayerPresence();
+  updateMultiplayerLoading();
   if (!tiles || !plane) return;
 
-  const rawDt = clock.getDelta();
+  const fixtureFrame = navigator.webdriver && Number.isFinite(testDt);
+  const rawDt = fixtureFrame ? Math.max(0, testDt) : clock.getDelta();
   const frameNow = performance.now();
-  if (document.hidden) return;
+  if (document.hidden && !fixtureFrame) return;
   const dt = Math.min(rawDt, 0.05);
   if (!menuOpen && !paused) {
     const qualityChanged = adaptiveQuality.sample(rawDt);
@@ -5109,7 +5599,7 @@ function tickFrame() {
     if (mate.mesh) spinRotors(mate.mesh, dt, plane.speed);
   }
 
-  if (mp.active && !menuOpen && !guessOpen && !crashed) {
+  if (mp.active && mp.inRound && !menuOpen && !guessOpen && !crashed) {
     const now = performance.now();
     if (now - mp.lastPoseAt > MATE_SEND_MS) {
       mp.lastPoseAt = now;
@@ -5126,6 +5616,7 @@ function tickFrame() {
         pitch: plane.pitch,
         roll: plane.roll,
         plane: selectedPlane,
+        presence: currentPlayerPresence(),
         state: plane.state,
         motion: Math.abs(plane.speed),
       });
@@ -5136,6 +5627,10 @@ function tickFrame() {
     const renderAt = performance.now() - MATE_INTERP_MS;
     for (const [id, track] of mp.poses) {
       if (id === mp.myId) continue;
+      if (mp.players.get(id)?.inRound === false) {
+        retireMultiplayerAvatar(id);
+        continue;
+      }
       const samples = track.samples;
       if (samples?.[samples.length - 1]?.space) {
         const spaceMate = mp.mates.get(id);
@@ -5600,7 +6095,8 @@ function tickFrame() {
   window.__planeMesh = planeMesh;
 }
 
-window.__forceTestMate = () => {
+window.__forceTestMate = ({ aheadM = 35, eastM = 10, firstPerson = false } = {}) => {
+  if (!navigator.webdriver) return false;
   mp.active = true;
   mp.players.set("test-mate", {
     id: "test-mate",
@@ -5619,11 +6115,11 @@ window.__forceTestMate = () => {
   el.lobby.classList.add("hidden");
   hideMpWait();
   const R = 6378137;
-  const aheadM = 35;
-  const eastM = 10;
+  if (firstPerson) orbit.zoom = 0.4;
   const lat = plane.latDeg + (aheadM / R) * (180 / Math.PI);
   const lon = plane.lonDeg + (eastM / (R * Math.cos(plane.lat))) * (180 / Math.PI);
   seedMatePose("test-mate", lat, lon, plane.height, selectedPlane);
+  mp.poses.get("test-mate").samples[0].state = plane.state || "airborne";
   mp.goAt = performance.now();
   updateVoiceUi();
 };
@@ -5664,32 +6160,91 @@ window.__testSoftPlayerBump = () => {
   };
 };
 
-window.__testPopulateLobby = (count = 40) => {
+window.__testMultiplayerContactPose = ({ key = "parachutist", state = "grounded", east = 0, north = 0, h = 100 } = {}) => {
+  if (!navigator.webdriver || !mp.active || !PLANES[key]) return null;
+  selectPlane(PLANE_ORDER.indexOf(key), 0, true);
+  if (planeMesh?.userData?.key !== key) loadPlane(key);
+  resetFlight(52.38871, 16.60069);
+  mp.poses.clear();
+  disposeAllMates();
+  plane.lat += north / 6378137;
+  plane.lon += east / (6378137 * Math.cos(plane.lat));
+  plane.height = h;
+  plane.speed = 0;
+  plane.state = state;
+  plane.verticalSpeed = 0;
+  plane.pitch = 0;
+  plane.roll = 0;
+  groundAlt = h - PARACHUTIST_GROUND_CLEARANCE;
+  mp.inRound = true;
+  mp.roundActive = true;
+  mp.goSent = true;
+  mp.goAt = performance.now() - 2000;
+  for (const player of mp.players.values()) {
+    player.inRound = true;
+    player.plane = key;
+  }
+  pendingSnap = false;
+  awaitingSnap = false;
+  menuOpen = false;
+  paused = false;
+  guessOpen = false;
+  el.menu.classList.add("hidden");
+  el.landing.classList.add("hidden");
+  el.lobby.classList.add("hidden");
+  hideMpWait();
+  return { t: "pose", from: mp.myId, seq: ++mp.poseSeq, at: performance.now(), ...currentLocalPlayerPose() };
+};
+
+window.__testMultiplayerContactFrame = (dt = 0) => {
+  if (!navigator.webdriver || !mp.active) return null;
+  const before = { lat: plane.latDeg, lon: plane.lonDeg, h: plane.height };
+  tickFrame(dt);
+  return { moved: distanceM(before.lat, before.lon, plane.latDeg, plane.lonDeg),
+    velocity: playerInteractionVelocity.toArray(), state: plane.state, h: plane.height,
+    supportedBy: multiplayerSupportedBy, crashed };
+};
+
+window.__testPopulateLobby = (count = 40, asGuest = false, guestId = "test-player-1") => {
   if (!navigator.webdriver) return false;
   mp.net?.destroy?.();
+  window.__testLobbyMessages = [];
   mp.net = {
-    send() {},
-    sendTo() {},
-    sendExcept() {},
+    send(data) { window.__testLobbyMessages.push({ kind: "send", data }); },
+    sendTo(id, data) { window.__testLobbyMessages.push({ kind: "sendTo", id, data }); },
+    sendExcept(id, data) { window.__testLobbyMessages.push({ kind: "sendExcept", id, data }); },
     disconnect(peerId) { handlePeerLeft(peerId); return true; },
     call() { return null; },
     destroy() {},
   };
   mp.active = true;
-  mp.host = true;
-  mp.myRole = "admin";
+  mp.host = !asGuest;
+  mp.myRole = asGuest ? "player" : "admin";
   mp.myApproved = true;
-  mp.myId = "test-host";
+  mp.myId = asGuest ? guestId : "test-host";
   mp.roomId = "test-host";
-  mp.myName = "Host";
+  mp.myName = asGuest ? "Pilot 1" : "Host";
+  mp.myReady = false;
+  mp.inRound = false;
+  mp.roundActive = false;
+  mp.launching = false;
+  mp.lockedPlane = "";
+  mp.spawnSpacing = null;
+  mp.lastPresenceSent = null;
   mp.players.clear();
+  if (asGuest) mp.players.set("test-host", {
+    id: "test-host", name: "Host", role: "admin", approved: true,
+    plane: selectedPlane, ready: false, inRound: false, muted: false, score: 0, waiting: false,
+  });
   const total = Math.max(1, Math.min(200, Math.floor(Number(count) || 40)));
   for (let index = 1; index < total; index += 1) {
     const id = `test-player-${index}`;
+    if (id === mp.myId) continue;
     mp.players.set(id, {
       id,
       name: `Pilot ${index}`,
       role: "player",
+      protocolVersion: MULTIPLAYER_PROTOCOL_VERSION,
       approved: false,
       muted: false,
       plane: "pa28",
@@ -5703,12 +6258,62 @@ window.__testPopulateLobby = (count = 40) => {
   return mp.players.size + 1;
 };
 
+window.__testReceiveLobbyMessage = (data, fromId) => {
+  if (!navigator.webdriver) return null;
+  if (data) handleNetData(data, fromId);
+  return { lockedPlane: mp.lockedPlane, roster: rosterPayload(), selectedPlane,
+    model: planeMesh?.userData?.key, parachutistModel: !!planeMesh?.userData?.parachutist,
+    controller: plane?.constructor.name, inRound: mp.inRound, roundActive: mp.roundActive,
+    goSent: mp.goSent, goAt: mp.goAt, menuOpen, spawnSpacing: mp.spawnSpacing,
+    crashed, paused, pendingSnap, awaitingSnap, launching: mp.launching, waitingGo: mp.waitingGo,
+    mateIds: [...mp.mates.keys()], poseIds: [...mp.poses.keys()], seats: { ...mp.seats },
+    snapLastGh, snappedIds: [...mp.snapped], snapInfo: Object.fromEntries(mp.snapInfo),
+    roundId: mp.roundStart?.roundId, goPayload: mp.goPayload,
+    loadingTimer: mp.loadingTimer != null,
+    lat: plane?.latDeg, lon: plane?.lonDeg, h: plane?.height, space: spaceModeActive };
+};
+
+window.__testMultiplayerCrash = () => {
+  if (!navigator.webdriver || !mp.active || !mp.inRound) return false;
+  if (spaceModeActive) triggerSpaceImpact("SPACE IMPACT", "Fixture collision");
+  else {
+    tickFrame(0);
+    crash();
+  }
+  return crashed;
+};
+
+window.__testTerrainLoading = (gh = 20) => {
+  if (!navigator.webdriver || !tiles) return false;
+  // Replace only the external tile data, keeping the real sampling, stability
+  // checks and multiplayer loading barrier in the frame loop.
+  tiles.raycast = (terrainRay, hits) => {
+    if (!Number.isFinite(gh) || !plane) return;
+    const point = new Vector3();
+    WGS84_ELLIPSOID.getCartographicToPosition(plane.lat, plane.lon, gh, point);
+    point.applyMatrix4(tiles.group.matrixWorld);
+    hits.push({ point, distance: point.distanceTo(terrainRay.ray.origin) });
+  };
+  return true;
+};
+
+window.__testSnapMultiplayerStart = (gh = 20) => {
+  if (!navigator.webdriver || !mp.inRound || !plane) return false;
+  groundAlt = Number(gh);
+  snapLastGh = groundAlt;
+  plane.height = groundAlt + snapAgl();
+  pendingSnap = false;
+  awaitingSnap = false;
+  reportSnapped();
+  return true;
+};
+
 window.__testLobbyChatMessage = (text = "Hello lobby") => {
   if (!navigator.webdriver) return false;
   return appendLobbyChat({ id: mp.myId || "test-host", name: mp.myName, text });
 };
 
-window.__testRocketLaunch = (height = 99980, testVelocity = 1200, multiplayer = false) => {
+window.__testRocketLaunch = (height = 99980, testVelocity = 1200, multiplayer = false, preserveSession = false) => {
   if (!navigator.webdriver) return false;
   const rocketIndex = PLANE_ORDER.indexOf("rocket");
   selectMode("free");
@@ -5719,7 +6324,7 @@ window.__testRocketLaunch = (height = 99980, testVelocity = 1200, multiplayer = 
   paused = false;
   guessOpen = false;
   mp.active = !!multiplayer;
-  if (multiplayer) {
+  if (multiplayer && !preserveSession) {
     mp.inRound = true;
     mp.roundActive = true;
     mp.myId = "test-space-player";
