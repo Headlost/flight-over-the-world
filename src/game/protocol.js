@@ -1,9 +1,12 @@
-const TYPES = new Set(['hello','welcome','roster','scope','mode','city','plane','name','chat','ready','talk','moderate','muted','removed','bump','snapped','go','rematch','start','pose','guess','done','roundEnd']);
-const GUEST_TYPES = new Set(['hello','plane','name','chat','ready','talk','moderate','bump','snapped','rematch','pose','guess','done']);
+const TYPES = new Set(['hello','bye','welcome','roster','scope','mode','city','plane','name','chat','ready','talk','moderate','muted','removed','resume','bump','snapped','go','rematch','start','pose','guess','done','roundEnd']);
+const GUEST_TYPES = new Set(['hello','bye','plane','name','chat','ready','talk','moderate','bump','snapped','rematch','pose','guess','done']);
 const PLANES = new Set(['pa28','q400','citation','jet','rocket','parachutist']);
 const PLAYER_ROLES = new Set(['admin','leader','player']);
 const finite = (n, low, high) => typeof n === 'number' && Number.isFinite(n) && n >= low && n <= high;
 const location = d => finite(d.lat,-90,90) && finite(d.lon,-180,180);
+const spaceVector = d => finite(d.x,-1e7,1e7) && finite(d.y,-1e7,1e7) && finite(d.z,-1e7,1e7)
+  && finite(d.fx,-1,1) && finite(d.fy,-1,1) && finite(d.fz,-1,1);
+const rotation = d => finite(d.qx,-1,1) && finite(d.qy,-1,1) && finite(d.qz,-1,1) && finite(d.qw,-1,1);
 export const PLAYER_NAME_MAX = 24;
 export const CHAT_MESSAGE_MAX = 280;
 
@@ -55,18 +58,30 @@ export function validMessage(data, fromGuest = false) {
   if (data.text != null && (typeof data.text !== 'string' || data.text.length > CHAT_MESSAGE_MAX)) return false;
   if (data.role != null && (!PLAYER_ROLES.has(data.role) || fromGuest)) return false;
   if (data.city != null && (typeof data.city !== 'string' || data.city.length > 240)) return false;
-  if (['pose','guess','start'].includes(data.t) && !location(data)) return false;
+  if (['guess','start'].includes(data.t) && !location(data)) return false;
   if (data.t === 'start' && data.mode === 'home' && !location({lat:data.homeLat,lon:data.homeLon})) return false;
-  if (['pose','snapped','go'].includes(data.t)) {
+  if (['snapped','go'].includes(data.t)) {
     if (!finite(data.h,-12000,1e7) || !finite(data.heading,-1e5,1e5)) return false;
-    if (data.t !== 'pose' && !finite(data.gh,-12000,1e7)) return false;
+    if (!finite(data.gh,-12000,1e7)) return false;
   }
-  if (data.t === 'pose' && (!finite(data.pitch,-Math.PI,Math.PI) || !finite(data.roll,-Math.PI,Math.PI) || !finite(data.seq,0,Number.MAX_SAFE_INTEGER) || !finite(data.at,0,Number.MAX_SAFE_INTEGER))) return false;
+  if (data.t === 'pose') {
+    if (!finite(data.seq,0,Number.MAX_SAFE_INTEGER) || !finite(data.at,0,Number.MAX_SAFE_INTEGER)) return false;
+    if (data.space === true) {
+      if (data.plane !== 'rocket' || !spaceVector(data) || !rotation(data)) return false;
+    } else if (!location(data) || !finite(data.h,-12000,1e7) || !finite(data.heading,-1e5,1e5) || !finite(data.pitch,-Math.PI,Math.PI) || !finite(data.roll,-Math.PI,Math.PI)) return false;
+  }
+  if (data.t === 'resume') {
+    if (!data.pose || typeof data.pose !== 'object' || typeof data.pose.space !== 'boolean') return false;
+    if (data.pose.space) {
+      if (data.plane !== 'rocket' || !spaceVector(data.pose) || !rotation(data.pose) || !finite(data.pose.motion,0,5000)) return false;
+    } else if (!location(data.pose) || !finite(data.pose.h,-12000,1e7) || !finite(data.pose.heading,-1e5,1e5) || !finite(data.pose.pitch,-Math.PI,Math.PI) || !finite(data.pose.roll,-Math.PI,Math.PI)) return false;
+  }
   if (data.t === 'bump' && (typeof data.target !== 'string' || data.target.length < 3 || data.target.length > 80 || !finite(data.ix,-8,8) || !finite(data.iy,-8,8) || !finite(data.iz,-8,8))) return false;
   if (data.t === 'moderate' && (!['mute','kick','approve'].includes(data.action) || typeof data.target !== 'string' || data.target.length < 3 || data.target.length > 80 || (data.action === 'mute' && typeof data.muted !== 'boolean') || (data.action === 'approve' && typeof data.approved !== 'boolean'))) return false;
   if (data.t === 'muted' && typeof data.muted !== 'boolean') return false;
   if (data.state != null && !['airborne','grounded','launching'].includes(data.state)) return false;
-  if (data.motion != null && !finite(data.motion,0,1000)) return false;
+  if (data.motion != null && !finite(data.motion,0,data.space === true ? 5000 : 1000)) return false;
+  if (data.resumeKey != null && (data.t !== 'hello' || typeof data.resumeKey !== 'string' || !/^[a-zA-Z0-9_-]{12,100}$/.test(data.resumeKey))) return false;
   for (const key of ['roster','players']) if (data[key] != null && (!Array.isArray(data[key]) || !data[key].every(p => p && typeof p.id === 'string' && typeof p.name === 'string' && p.name.length <= PLAYER_NAME_MAX && PLANES.has(p.plane) && (p.role == null || PLAYER_ROLES.has(p.role)) && (p.muted == null || typeof p.muted === 'boolean') && (p.approved == null || typeof p.approved === 'boolean') && (p.score == null || finite(p.score,0,1e9))))) return false;
   if (data.seats != null && (typeof data.seats !== 'object' || Array.isArray(data.seats) || !Object.values(data.seats).every(n => Number.isSafeInteger(n) && n >= 0))) return false;
   return true;

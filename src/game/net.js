@@ -28,6 +28,11 @@ const PEER_OPTS = {
 };
 
 const CONNECT_OPTS = { reliable: true, serialization: "json" };
+const HEARTBEAT_INTERVAL_MS = 2000;
+const HEARTBEAT_TIMEOUT_MS = 7000;
+const HEARTBEAT_START_GRACE_MS = 20000;
+const HEARTBEAT_PING = "__fotw_ping";
+const HEARTBEAT_PONG = "__fotw_pong";
 
 function roomId() {
   return "lns" + crypto.randomUUID().replaceAll("-", "");
@@ -84,12 +89,36 @@ export function hostRoom(handlers, existingId) {
   function attach(c) {
     if (conns.has(c.peer)) { c.close(); return; }
     const pid = c.peer;
+    let lastSeen = performance.now();
+    let connectedAt = lastSeen;
+    let heartbeatTimer = null;
     conns.set(pid, c);
-    const ready = () => handlers.onPeer?.(pid);
+    const ready = () => {
+      connectedAt = lastSeen = performance.now();
+      handlers.onPeer?.(pid);
+    };
     c.on("open", ready);
     const accept = messageGate(true);
-    c.on("data", (data) => { if (accept(data)) handlers.onData?.(data, pid); });
+    c.on("data", (data) => {
+      lastSeen = performance.now();
+      if (data?.t === HEARTBEAT_PONG) return;
+      if (accept(data)) handlers.onData?.(data, pid);
+    });
+    heartbeatTimer = setInterval(() => {
+      if (!c.open) return;
+      const now = performance.now();
+      if (now - connectedAt > HEARTBEAT_START_GRACE_MS && now - lastSeen > HEARTBEAT_TIMEOUT_MS) {
+        c.close();
+        return;
+      }
+      try {
+        c.send({ t: HEARTBEAT_PING });
+      } catch {
+        c.close();
+      }
+    }, HEARTBEAT_INTERVAL_MS);
     c.on("close", () => {
+      if (heartbeatTimer != null) clearInterval(heartbeatTimer);
       conns.delete(pid);
       handlers.onLeft?.(pid);
     });
@@ -191,7 +220,17 @@ export function joinRoom(hostId, handlers) {
       handlers.onPeer?.();
     });
     const accept = messageGate(false);
-    c.on("data", (data) => { if (accept(data)) handlers.onData?.(data); });
+    c.on("data", (data) => {
+      if (data?.t === HEARTBEAT_PING) {
+        try {
+          if (c.open) c.send({ t: HEARTBEAT_PONG });
+        } catch {
+          c.close();
+        }
+        return;
+      }
+      if (accept(data)) handlers.onData?.(data);
+    });
     c.on("close", () => {
       if (!destroyed && opened) handlers.onLeft?.();
     });

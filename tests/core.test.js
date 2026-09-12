@@ -101,8 +101,17 @@ test('mobile memory recovery preserves visible detail while limiting load spikes
   }
 });
 const pose = {t:'pose',lat:52,lon:16,h:400,heading:0,pitch:0,roll:0,seq:2,at:1200,plane:'pa28'};
+const spacePose = {t:'pose',space:true,x:2500,y:0,z:0,fx:0,fy:0,fz:-1,qx:0,qy:0,qz:0,qw:1,motion:72,seq:3,at:1300,plane:'rocket'};
 test('multiplayer rejects forged host commands, malformed poses and unsafe object keys', () => {
   assert.equal(validMessage(pose,true),true);
+  assert.equal(validMessage(spacePose,true),true);
+  assert.equal(validMessage({...spacePose,qw:2},true),false);
+  assert.equal(validMessage({...spacePose,plane:'jet'},true),false);
+  assert.equal(validMessage({t:'resume',plane:'rocket',pose:{...spacePose},seats:{host:0}}),true);
+  assert.equal(validMessage({t:'resume',plane:'rocket',pose:{...spacePose},seats:{host:0}},true),false);
+  assert.equal(validMessage({t:'hello',name:'Pilot',plane:'pa28',resumeKey:'pilot_123456789012'},true),true);
+  assert.equal(validMessage({t:'hello',name:'Pilot',plane:'pa28',resumeKey:'short'},true),false);
+  assert.equal(validMessage({t:'bye'},true),true);
   assert.equal(validMessage({...pose,plane:'parachutist',state:'grounded',motion:2},true),true);
   assert.equal(validMessage({...pose,state:'teleporting'},true),false);
   for (const field of ['lat','lon','h','heading','pitch','roll','seq','at']) assert.equal(validMessage({...pose,[field]:NaN},true),false);

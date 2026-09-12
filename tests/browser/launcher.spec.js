@@ -192,6 +192,8 @@ test('multiplayer aircraft labels show the nickname and live microphone icon', a
   await expect(page.locator('.mate-label-name')).toHaveText('Test Pilot');
   await expect(page.locator('.mate-label-mic')).toBeVisible();
   await expect(page.locator('.mate-label')).toHaveAttribute('aria-label', 'Test Pilot is talking');
+  expect(await page.evaluate(() => window.__testRemoveTestMate())).toBe(true);
+  await expect(page.locator('.mate-label')).toHaveCount(0);
 });
 
 test('large multiplayer lobbies scroll and keep chat below the QR panel', async ({page}) => {
@@ -437,6 +439,21 @@ test('rocket launch has the faster ascent profile', async ({page}) => {
   await expect.poll(() => page.evaluate(() => !!window.__game)).toBe(true);
   expect(await page.evaluate(() => window.__testRocketLaunch(1000, null))).toBe(true);
   await expect.poll(() => page.evaluate(() => window.__dbg?.rocketLaunchVelocity)).toBeGreaterThanOrEqual(225);
+});
+
+test('multiplayer rockets can travel through space and render nearby players', async ({page}) => {
+  test.setTimeout(25000);
+  await page.goto('/');
+  await expect.poll(() => page.evaluate(() => !!window.__game)).toBe(true);
+  expect(await page.evaluate(() => window.__testRocketLaunch(99980, 1200, true))).toBe(true);
+  await expect.poll(() => page.evaluate(() => window.__dbg?.spaceMode)).toBe(true);
+  await expect.poll(() => page.evaluate(() => window.__testLastMpMessage?.space)).toBe(true);
+  expect(await page.evaluate(() => window.__testSpaceMatePose())).toBe(true);
+  await expect.poll(() => page.evaluate(() => window.__testSpaceMateState()?.visible)).toBe(true);
+  const mate = await page.evaluate(() => window.__testSpaceMateState());
+  expect(mate.distance).toBeGreaterThan(0);
+  expect(mate.distance).toBeLessThan(6);
+  expect(mate.scale).toBeCloseTo(0.16, 3);
 });
 
 test('space environments support reentry, planetary surface flight and the black-hole farm return', async ({page}) => {

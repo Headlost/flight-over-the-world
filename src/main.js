@@ -527,11 +527,26 @@ function uniquePlayerName(base, excludeId = "") {
   return randomUsername();
 }
 
+function roomResumeKey(roomId) {
+  if (!roomId) return "";
+  const storageKey = `fotw-player-session:${roomId}`;
+  try {
+    const saved = localStorage.getItem(storageKey) || "";
+    if (/^[a-zA-Z0-9_-]{12,100}$/.test(saved)) return saved;
+    const created = `pilot_${crypto.randomUUID().replaceAll("-", "")}`;
+    localStorage.setItem(storageKey, created);
+    return created;
+  } catch {
+    return `pilot_${crypto.randomUUID().replaceAll("-", "")}`;
+  }
+}
+
 const mp = {
   active: false,
   host: false,
   roomId: "",
   myId: "",
+  resumeKey: "",
   net: null,
   myName: "Host",
   myRole: "player",
@@ -542,6 +557,8 @@ const mp = {
   inRound: false,
   roundActive: false,
   players: new Map(),
+  departed: new Map(),
+  kicked: new Set(),
   guesses: new Map(),
   poses: new Map(),
   mates: new Map(),
@@ -1035,9 +1052,18 @@ function applyRoster(list = []) {
   for (const id of [...mp.players.keys()]) {
     if (!keep.has(id)) {
       mp.players.delete(id);
+      mp.poses.delete(id);
+      mp.guesses.delete(id);
+      mp.snapInfo.delete(id);
+      mp.snapped.delete(id);
+      mp.talkers.delete(id);
+      mp.contactAt.delete(id);
+      mp.bumpRelayAt.delete(id);
+      dropVoicePeer(id);
       disposeMate(id);
     }
   }
+  updateVoiceUi();
   applyMultiplayerRoleColors();
 }
 
@@ -1287,6 +1313,8 @@ function applyLobbyModeration(actorId, action, targetId, value = false) {
     return true;
   }
   if (action !== "kick") return false;
+  mp.kicked.add(targetId);
+  if (target.resumeKey) mp.departed.delete(target.resumeKey);
   mp.net?.sendTo(targetId, { t: "removed", name: actorName });
   if (actorId === mp.myId) setLobbyStatus(`${target.name} removed from the lobby`);
   const room = mp.net;
@@ -1424,9 +1452,115 @@ async function handleVoiceCall(call) {
   refreshVoice();
 }
 
+function latestPlayerPose(id) {
+  const track = mp.poses.get(id);
+  const sample = track?.samples?.[track.samples.length - 1];
+  return sample ? { ...sample, plane: track.plane || mp.players.get(id)?.plane || "pa28" } : null;
+}
+
+function rememberDepartedPlayer(id, player) {
+  if (!mp.host || !player?.resumeKey || mp.kicked.has(id)) return;
+  mp.departed.set(player.resumeKey, {
+    player: {
+      name: player.name,
+      role: normalizedPlayerRole(player.role),
+      approved: !!player.approved,
+      muted: !!player.muted,
+      plane: player.plane || "pa28",
+      ready: false,
+      score: player.score || 0,
+      waiting: !!player.waiting,
+      inRound: !!player.inRound,
+    },
+    pose: latestPlayerPose(id),
+    seat: mp.seats[id],
+  });
+}
+
+function restoredSeat(preferred) {
+  const used = new Set(Object.values(mp.seats).filter(Number.isSafeInteger));
+  if (Number.isSafeInteger(preferred) && preferred >= 0 && !used.has(preferred)) return preferred;
+  let next = 0;
+  while (used.has(next)) next += 1;
+  return next;
+}
+
+function resumeMessage(record) {
+  return {
+    t: "resume",
+    plane: record.pose.plane || record.player.plane || "pa28",
+    pose: record.pose,
+    seats: { ...mp.seats },
+    round: mp.roundStart ? { ...mp.roundStart } : null,
+  };
+}
+
+function resumeMultiplayerFlight(data) {
+  const pose = data.pose;
+  if (!pose || !mp.active || !mp.myId) return false;
+  const planeKey = PLANES[data.plane] ? data.plane : "pa28";
+  selectPlane(PLANE_ORDER.indexOf(planeKey), 0, true);
+  if (planeMesh?.userData?.key !== planeKey) loadPlane(planeKey);
+  const round = data.round && typeof data.round === "object" ? data.round : {};
+  mp.roundStart = Object.keys(round).length ? round : mp.roundStart;
+  mp.truth = Number.isFinite(round.lat) && Number.isFinite(round.lon)
+    ? { lat: round.lat, lon: round.lon }
+    : mp.truth;
+  mp.seats = data.seats || mp.seats;
+  mp.roundActive = true;
+  mp.inRound = true;
+  mp.waiting = false;
+  mp.myReady = false;
+  mp.goSent = true;
+  mp.waitingGo = false;
+  mp.lastPoseAt = 0;
+  mode = "free";
+  const baseLat = pose.space ? (mp.truth?.lat ?? startLat) : pose.lat;
+  const baseLon = pose.space ? (mp.truth?.lon ?? startLon) : pose.lon;
+  beginFlight(baseLat, baseLon);
+  pendingSnap = false;
+  awaitingSnap = false;
+  paused = false;
+  finishSnapStart();
+  if (pose.space) {
+    enterSpaceFlight();
+    spaceFlight.position.set(pose.x, pose.y, pose.z);
+    spaceFlight.forward.set(pose.fx, pose.fy, pose.fz).normalize();
+    spaceFlight.speed = pose.motion || 0;
+    spaceFlight.targetName = spaceFlight.bodies.has(pose.targetName) ? pose.targetName : "Moon";
+    spaceFlight.orbitBody = spaceFlight.bodies.has(pose.orbitBody) ? pose.orbitBody : null;
+    spaceFlight.orbitRadius = Number.isFinite(pose.orbitRadius) ? pose.orbitRadius : 0;
+    spaceFlight.orbitAngle = Number.isFinite(pose.orbitAngle) ? pose.orbitAngle : 0;
+    spaceFlight.surfaceBody = spaceFlight.bodies.has(pose.surfaceBody) ? pose.surfaceBody : null;
+    spaceFlight.surfaceClearance = Number.isFinite(pose.surfaceClearance) ? pose.surfaceClearance : 0;
+    spaceFlight.hyperdrive = !!pose.hyperdrive;
+    spaceFlight.autopilot = !!pose.autopilot;
+  } else if (plane) {
+    const deg = Math.PI / 180;
+    plane.lat = pose.lat * deg;
+    plane.lon = pose.lon * deg;
+    plane.height = pose.h;
+    plane.heading = pose.heading;
+    plane.pitch = pose.pitch;
+    plane.roll = pose.roll;
+    plane.speed = pose.motion || 0;
+    if (selectedPlane === "parachutist" && ["airborne", "grounded", "launching"].includes(pose.state)) {
+      plane.state = pose.state;
+      if (pose.state === "grounded") groundAlt = pose.h - 0.25;
+    }
+  }
+  setLobbyStatus("Reconnected at your last position");
+  return true;
+}
+
 function handleNetData(data, fromId) {
   if (!validMessage(data, mp.host && !!fromId)) return;
   if (mp.host && fromId && data.t !== "hello" && !mp.players.has(fromId)) return;
+  if (mp.host && fromId && data.t === "bye") {
+    handlePeerLeft(fromId);
+    mp.net?.disconnect?.(fromId);
+    return;
+  }
   if (mp.host && fromId && data.t === "talk" && data.on && mp.players.get(fromId)?.muted) {
     mp.net?.sendTo(fromId, { t: "muted", muted: true, name: "Admin" });
     return;
@@ -1438,20 +1572,26 @@ function handleNetData(data, fromId) {
 
   if (data.t === "hello") {
     if (!mp.host || !fromId) return;
-    const waiting = mp.roundActive;
-    const name = uniquePlayerName(data.name);
+    const record = data.resumeKey ? mp.departed.get(data.resumeKey) : null;
+    const canResume = !!(record?.pose && record.player.inRound && mp.roundActive && mp.roundStart);
+    const waiting = mp.roundActive && !canResume;
+    const name = uniquePlayerName(record?.player.name || data.name);
+    const restored = record?.player || {};
     mp.players.set(fromId, {
       id: fromId,
       name,
-      role: "player",
-      approved: false,
-      plane: data.plane || "pa28",
+      resumeKey: data.resumeKey || "",
+      role: normalizedPlayerRole(restored.role),
+      approved: restored.role === "leader" || !!restored.approved,
+      plane: record?.pose?.plane || restored.plane || data.plane || "pa28",
       ready: false,
-      muted: false,
-      score: 0,
+      muted: !!restored.muted,
+      score: restored.score || 0,
       waiting,
-      inRound: false,
+      inRound: canResume,
     });
+    if (canResume) mp.seats[fromId] = restoredSeat(record.seat);
+    if (data.resumeKey) mp.departed.delete(data.resumeKey);
     mp.net.sendTo(fromId, {
       t: "welcome",
       id: fromId,
@@ -1472,6 +1612,7 @@ function handleNetData(data, fromId) {
         text: message.text,
       });
     }
+    if (canResume) mp.net.sendTo(fromId, resumeMessage(record));
     broadcastRoster();
     renderLobby();
     refreshVoice();
@@ -1498,6 +1639,9 @@ function handleNetData(data, fromId) {
     applyLobbySetup();
     renderLobby();
     refreshVoice();
+  } else if (data.t === "resume") {
+    if (mp.host) return;
+    resumeMultiplayerFlight(data);
   } else if (data.t === "scope") {
     applyRemoteRegion(data);
     setLobbyScope(data.scope);
@@ -1635,7 +1779,7 @@ function handleNetData(data, fromId) {
 
 function handlePeerJoined() {
   if (mp.host) return;
-  mp.net?.send({ t: "hello", name: mp.myName, plane: selectedPlane });
+  mp.net?.send({ t: "hello", name: mp.myName, plane: selectedPlane, resumeKey: mp.resumeKey });
 }
 
 function handlePeerLeft(peerId) {
@@ -1649,6 +1793,9 @@ function handlePeerLeft(peerId) {
   if (!peerId) {
     disposeAllMates();
     mp.players.clear();
+    mp.poses.clear();
+    mp.guesses.clear();
+    mp.talkers.clear();
     mp.roundActive = false;
     mp.inRound = false;
     mp.waiting = false;
@@ -1658,9 +1805,13 @@ function handlePeerLeft(peerId) {
     return;
   }
   const gone = mp.players.get(peerId);
+  if (gone) rememberDepartedPlayer(peerId, gone);
   mp.players.delete(peerId);
   mp.poses.delete(peerId);
   mp.guesses.delete(peerId);
+  mp.snapInfo.delete(peerId);
+  mp.snapped.delete(peerId);
+  delete mp.seats[peerId];
   disposeMate(peerId);
   if (mp.host) {
     checkRoundClear();
@@ -1668,7 +1819,8 @@ function handlePeerLeft(peerId) {
   }
   if (guessOpen) maybeRevealGuesses();
   renderLobby();
-  if (gone) setLobbyStatus(`${gone.name} left the room`);
+  const wasKicked = mp.kicked.delete(peerId);
+  if (gone) setLobbyStatus(wasKicked ? `${gone.name} was removed from the room` : `${gone.name} left the room`);
 }
 
 function handleNetError(err) {
@@ -1685,10 +1837,12 @@ function handleNetError(err) {
 }
 
 function closeRoom() {
+  if (mp.active && !mp.host) mp.net?.send({ t: "bye" });
   mp.net?.destroy();
   mp.net = null;
   mp.roomId = "";
   mp.myId = "";
+  mp.resumeKey = "";
   mp.host = false;
   mp.myRole = "player";
   mp.myApproved = false;
@@ -1702,6 +1856,8 @@ function closeRoom() {
   mp.bumpRelayAt.clear();
   mp.contactAt.clear();
   mp.players.clear();
+  mp.departed.clear();
+  mp.kicked.clear();
   mp.guesses.clear();
   mp.poses.clear();
   mp.seats = {};
@@ -1762,6 +1918,7 @@ function openGuestLobby(id) {
   mp.myName = randomUsername();
   applyMultiplayerRoleColors();
   mp.roomId = id;
+  mp.resumeKey = roomResumeKey(id);
   showLobby();
   el.lobbyLink.value = roomLink(id);
   setLobbyStatus("Joining room…");
@@ -1902,10 +2059,15 @@ function pushMatePose(id, data) {
   const senderAt = typeof data.at === "number" ? data.at : localNow;
   if (track.clockOff == null) track.clockOff = localNow - senderAt;
   else track.clockOff += (localNow - senderAt - track.clockOff) * 0.04;
-  const last = track.samples[track.samples.length - 1];
+  let last = track.samples[track.samples.length - 1];
+  if (last && last.space !== (data.space === true)) {
+    track.samples.length = 0;
+    last = null;
+  }
   const at = Math.max(senderAt + track.clockOff, last ? last.at + 1 : 0);
   track.samples.push({
     at,
+    space: data.space === true,
     lat: data.lat,
     lon: data.lon,
     h: data.h,
@@ -1914,6 +2076,24 @@ function pushMatePose(id, data) {
     roll: data.roll,
     state: data.state || "airborne",
     motion: data.motion || 0,
+    x: data.x,
+    y: data.y,
+    z: data.z,
+    fx: data.fx,
+    fy: data.fy,
+    fz: data.fz,
+    qx: data.qx,
+    qy: data.qy,
+    qz: data.qz,
+    qw: data.qw,
+    targetName: data.targetName,
+    orbitBody: data.orbitBody,
+    orbitRadius: data.orbitRadius,
+    orbitAngle: data.orbitAngle,
+    surfaceBody: data.surfaceBody,
+    surfaceClearance: data.surfaceClearance,
+    hyperdrive: !!data.hyperdrive,
+    autopilot: !!data.autopilot,
   });
   if (track.samples.length > 24) track.samples.splice(0, track.samples.length - 24);
 }
@@ -2141,6 +2321,12 @@ function finishRoomRound() {
     p.waiting = false;
     p.inRound = false;
     p.ready = false;
+  }
+  for (const record of mp.departed.values()) {
+    record.player.inRound = false;
+    record.player.waiting = false;
+    record.pose = null;
+    record.seat = undefined;
   }
   mp.guesses.clear();
   mp.poses.clear();
@@ -3187,6 +3373,9 @@ document.addEventListener('visibilitychange', () => {
   if (document.hidden) clearFlightInput();
   else if (streetModeActive && externalStreetWindow?.closed) leaveStreetView();
 });
+window.addEventListener('pagehide', () => {
+  if (mp.active && !mp.host) mp.net?.send({ t: "bye" });
+});
 function clearFlightInput() {
   keys.clear(); ctrl.roll = 0; ctrl.pitch = 0; ctrl.throttle = 0; ctrl.cameraClimb = 0;
   resetStick(); touch.boost = false; touch.brake = false; stopTalk();
@@ -3411,7 +3600,99 @@ const spaceCameraGoal = new Vector3();
 const spaceViewOffset = new Vector3();
 const spacePositionBefore = new Vector3();
 const spaceCameraTravel = new Vector3();
+const spaceMateQuat = new Quaternion();
 const spaceCtrl = { roll: 0, pitch: 0, throttle: 0 };
+
+function sendSpacePose(now = performance.now()) {
+  if (!mp.active || !mp.inRound || !mp.net || menuOpen || crashed || blackHoleSequence) return;
+  if (now - mp.lastPoseAt <= MATE_SEND_MS) return;
+  mp.lastPoseAt = now;
+  mp.poseSeq += 1;
+  mp.net.send({
+    t: "pose",
+    from: mp.myId,
+    seq: mp.poseSeq,
+    at: now,
+    plane: "rocket",
+    space: true,
+    x: spaceFlight.position.x,
+    y: spaceFlight.position.y,
+    z: spaceFlight.position.z,
+    fx: spaceFlight.forward.x,
+    fy: spaceFlight.forward.y,
+    fz: spaceFlight.forward.z,
+    qx: planeMesh.quaternion.x,
+    qy: planeMesh.quaternion.y,
+    qz: planeMesh.quaternion.z,
+    qw: planeMesh.quaternion.w,
+    motion: Math.abs(spaceFlight.speed),
+    targetName: spaceFlight.targetName,
+    orbitBody: spaceFlight.orbitBody || "",
+    orbitRadius: spaceFlight.orbitRadius,
+    orbitAngle: spaceFlight.orbitAngle,
+    surfaceBody: spaceFlight.surfaceBody || "",
+    surfaceClearance: spaceFlight.surfaceClearance,
+    hyperdrive: !!spaceFlight.hyperdrive,
+    autopilot: !!spaceFlight.autopilot,
+  });
+}
+
+function renderSpaceMates(dt) {
+  const renderAt = performance.now() - MATE_INTERP_MS;
+  for (const [id, track] of mp.poses) {
+    if (id === mp.myId) continue;
+    const samples = track.samples;
+    const latest = samples?.[samples.length - 1];
+    if (!latest?.space) {
+      const hiddenMate = mp.mates.get(id);
+      if (hiddenMate?.mesh) hiddenMate.mesh.visible = false;
+      if (hiddenMate?.marker) hiddenMate.marker.visible = false;
+      if (hiddenMate?.label) hiddenMate.label.hidden = true;
+      continue;
+    }
+    if (!mp.mates.get(id)?.mesh || mp.mates.get(id)?.key !== "rocket") loadMate(id, "rocket");
+    const mate = mp.mates.get(id);
+    if (!mate?.mesh) continue;
+    let from = samples[0];
+    let to = latest;
+    let u = 1;
+    if (renderAt <= from.at) {
+      to = from;
+      u = 0;
+    } else if (renderAt < to.at) {
+      for (let index = 1; index < samples.length; index += 1) {
+        if (samples[index].at >= renderAt) {
+          from = samples[index - 1];
+          to = samples[index];
+          u = (renderAt - from.at) / Math.max(1, to.at - from.at);
+          break;
+        }
+      }
+    } else {
+      from = to;
+    }
+    mate.mesh.position.set(
+      from.x + (to.x - from.x) * u,
+      from.y + (to.y - from.y) * u,
+      from.z + (to.z - from.z) * u,
+    );
+    mate.mesh.quaternion
+      .set(from.qx, from.qy, from.qz, from.qw)
+      .slerp(spaceMateQuat.set(to.qx, to.qy, to.qz, to.qw), u);
+    mate.mesh.scale.setScalar(0.16);
+    mate.mesh.visible = true;
+    if (mate.marker) mate.marker.visible = false;
+    updateRocketPlume(
+      mate.mesh,
+      true,
+      latest.hyperdrive ? 1.3 : Math.max(0.42, (latest.motion || 0) / spaceFlight.cruiseSpeed),
+      true,
+      clock.elapsedTime,
+    );
+    mate.interactionAt = to.at;
+    spinRotors(mate.mesh, dt, latest.motion || 0);
+  }
+}
 
 function setSpaceNotice(message, duration = 2600) {
   spaceNotice = message;
@@ -3490,8 +3771,8 @@ el.spaceEnter?.addEventListener("click", handleSpaceEntryAction);
 
 function startRocketLaunch() {
   if (selectedPlane !== "rocket" || !plane || menuOpen || paused || guessOpen || spaceModeActive || rocketLaunch || earthReentry) return;
-  if (mp.active || mode !== "free") {
-    setSpaceNotice("Orbital flight is available in single-player Free flight.", 4200);
+  if (mode !== "free") {
+    setSpaceNotice("Orbital flight is available in Free flight.", 4200);
     return;
   }
   rocketLaunch = { velocity: Math.max(225, plane.speed * 1.5), startedAt: performance.now() };
@@ -4087,6 +4368,8 @@ function tickSpaceFrame(dt, rawDt, flying) {
     true,
     clock.elapsedTime,
   );
+  sendSpacePose();
+  renderSpaceMates(dt);
 
   spaceRight.crossVectors(spaceFlight.forward, spaceUp);
   if (spaceRight.lengthSq() < 1e-5) spaceRight.set(1, 0, 0);
@@ -4144,6 +4427,7 @@ function tickSpaceFrame(dt, rawDt, flying) {
   updateMusic();
   if (frameCount % 2 === 0) updateHud(0);
   if (frameCount % 4 === 0) syncTouchUi();
+  updateMateLabels();
   renderer.render(scene, camera);
 
   const nearest = spaceFlight.nearestBody();
@@ -4853,6 +5137,13 @@ function tickFrame() {
     for (const [id, track] of mp.poses) {
       if (id === mp.myId) continue;
       const samples = track.samples;
+      if (samples?.[samples.length - 1]?.space) {
+        const spaceMate = mp.mates.get(id);
+        if (spaceMate?.mesh) spaceMate.mesh.visible = false;
+        if (spaceMate?.marker) spaceMate.marker.visible = false;
+        if (spaceMate?.label) spaceMate.label.hidden = true;
+        continue;
+      }
       if (!mp.mates.get(id)?.mesh || mp.mates.get(id)?.key !== track.plane) loadMate(id, track.plane || "pa28");
       const mate = mp.mates.get(id);
       if (!mate?.mesh || !samples?.length) continue;
@@ -5263,6 +5554,16 @@ function tickFrame() {
     crashed,
     audio: engineDebug(),
     music: musicDebug(),
+    tesseractVideo: el.tesseractVideo ? {
+      currentTime: Math.round(el.tesseractVideo.currentTime * 1000) / 1000,
+      duration: Number.isFinite(el.tesseractVideo.duration) ? Math.round(el.tesseractVideo.duration * 1000) / 1000 : null,
+      paused: el.tesseractVideo.paused,
+      readyState: el.tesseractVideo.readyState,
+      videoWidth: el.tesseractVideo.videoWidth,
+      videoHeight: el.tesseractVideo.videoHeight,
+      muted: el.tesseractVideo.muted,
+      error: tesseractVideoError || el.tesseractVideo.error?.message || "",
+    } : null,
     camDist: camera.position.distanceTo(planePos),
     camOffset,
     mpActive: mp.active,
@@ -5325,6 +5626,12 @@ window.__forceTestMate = () => {
   seedMatePose("test-mate", lat, lon, plane.height, selectedPlane);
   mp.goAt = performance.now();
   updateVoiceUi();
+};
+
+window.__testRemoveTestMate = () => {
+  if (!navigator.webdriver) return false;
+  applyRoster([]);
+  return !mp.players.has("test-mate") && !mp.poses.has("test-mate") && !mp.mates.has("test-mate");
 };
 
 window.__testEnableMobileVoice = (talking = false) => {
@@ -5401,7 +5708,7 @@ window.__testLobbyChatMessage = (text = "Hello lobby") => {
   return appendLobbyChat({ id: mp.myId || "test-host", name: mp.myName, text });
 };
 
-window.__testRocketLaunch = (height = 99980, testVelocity = 1200) => {
+window.__testRocketLaunch = (height = 99980, testVelocity = 1200, multiplayer = false) => {
   if (!navigator.webdriver) return false;
   const rocketIndex = PLANE_ORDER.indexOf("rocket");
   selectMode("free");
@@ -5411,7 +5718,22 @@ window.__testRocketLaunch = (height = 99980, testVelocity = 1200) => {
   menuOpen = false;
   paused = false;
   guessOpen = false;
-  mp.active = false;
+  mp.active = !!multiplayer;
+  if (multiplayer) {
+    mp.inRound = true;
+    mp.roundActive = true;
+    mp.myId = "test-space-player";
+    mp.roomId = "test-space-room";
+    window.__testLastMpMessage = null;
+    mp.net = {
+      send(data) { window.__testLastMpMessage = data; },
+      sendTo() {},
+      sendExcept() {},
+      disconnect() { return false; },
+      call() { return null; },
+      destroy() {},
+    };
+  }
   pendingSnap = false;
   awaitingSnap = false;
   crashed = false;
@@ -5423,6 +5745,54 @@ window.__testRocketLaunch = (height = 99980, testVelocity = 1200) => {
   startRocketLaunch();
   if (rocketLaunch && Number.isFinite(testVelocity)) rocketLaunch.velocity = testVelocity;
   return !!rocketLaunch;
+};
+
+window.__testSpaceMatePose = () => {
+  if (!navigator.webdriver || !spaceModeActive) return false;
+  const id = "test-space-mate";
+  mp.players.set(id, {
+    id,
+    name: "Space Pilot",
+    role: "player",
+    approved: true,
+    plane: "rocket",
+    ready: false,
+    muted: false,
+    score: 0,
+    waiting: false,
+    inRound: true,
+  });
+  pushMatePose(id, {
+    t: "pose",
+    from: id,
+    seq: 1,
+    at: performance.now(),
+    plane: "rocket",
+    space: true,
+    x: spaceFlight.position.x + 4,
+    y: spaceFlight.position.y,
+    z: spaceFlight.position.z - 3,
+    fx: spaceFlight.forward.x,
+    fy: spaceFlight.forward.y,
+    fz: spaceFlight.forward.z,
+    qx: planeMesh.quaternion.x,
+    qy: planeMesh.quaternion.y,
+    qz: planeMesh.quaternion.z,
+    qw: planeMesh.quaternion.w,
+    motion: spaceFlight.speed,
+  });
+  loadMate(id, "rocket");
+  return true;
+};
+
+window.__testSpaceMateState = () => {
+  if (!navigator.webdriver) return null;
+  const mate = mp.mates.get("test-space-mate");
+  return mate?.mesh ? {
+    visible: mate.mesh.visible,
+    distance: mate.mesh.position.distanceTo(spaceFlight.position),
+    scale: mate.mesh.scale.x,
+  } : null;
 };
 
 window.__testGroundedParachutist = () => {
