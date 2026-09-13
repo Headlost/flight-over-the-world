@@ -1,3 +1,5 @@
+[![Flight Over the World — główne zdjęcie z lotu nad miastem](Flight%20over%20the%20word%20picture/glowne.png)](Flight%20over%20the%20word%20picture/glowne.png)
+
 # Flight Over the World 2.0 — online
 
 **Graj:** https://headlost.github.io/flight-over-the-world/

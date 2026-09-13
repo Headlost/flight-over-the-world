@@ -1,6 +1,8 @@
+[![Flight Over the World — główne zdjęcie z lotu nad miastem](glowne.png)](glowne.png)
+
 # Zdjęcia z rozgrywki
 
-Wszystkie 10 zrzutów ekranu z folderu „Flight over the word picture”, zachowane w oryginalnej jakości. Kliknij zdjęcie, aby otworzyć jego plik.
+Zdjęcie główne powyżej oraz 10 dodatkowych zrzutów ekranu z folderu „Flight over the word picture”, zachowane w oryginalnej jakości. Kliknij zdjęcie, aby otworzyć jego plik.
 
 [![Zrzut ekranu (30)](Zrzut%20ekranu%20%2830%29.png)](Zrzut%20ekranu%20%2830%29.png)
 
