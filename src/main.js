@@ -2,6 +2,7 @@ import { settings, setupSettings } from './game/settings.js';
 import { disposeModel } from './game/dispose.js';
 import { QUALITY, renderRatio, AdaptiveQuality, terrainStreamProfile } from './game/quality.js';
 import { geocodeCity, setupLocationPicker } from './game/location.js';
+import { TerrainRenderer } from './game/terrainRenderer.js';
 import {
   validMessage,
   escapeHtml,
@@ -24,7 +25,6 @@ import QRCode from 'qrcode';
 import {
   WGS84_ELLIPSOID,
   CAMERA_FRAME,
-  TilesRenderer,
 } from "3d-tiles-renderer";
 import {
   TilesFadePlugin,
@@ -496,6 +496,7 @@ let guessAnswered = false;
 let guessScope = "pl"; // pl | world
 let awaitingSnap = false; // guess: menu/overlay czeka na pomiar terenu, start od razu na ~350 m
 let awaitingSnapSince = 0;
+let soloStartRequest = 0;
 let snapLastGh = null; // dosadzenie dopiero gdy pomiar terenu się ustabilizuje (kafelki się doprecyzują)
 let snapStableCount = 0;
 let snapFirstAt = 0;
@@ -891,6 +892,12 @@ el.fatalOk?.addEventListener("click", () => hideFatal());
 showCrashHints();
 
 function showLanding() {
+  soloStartRequest += 1;
+  awaitingSnap = false;
+  pendingSnap = false;
+  el.start.disabled = false;
+  el.menuError.textContent = "";
+  clearStarting();
   closeRoom();
   mp.active = false;
   menuOpen = true;
@@ -2866,7 +2873,7 @@ function init() {
   camera.add(firstPersonRig);
   scene.add(camera);
 
-  tiles = new TilesRenderer();
+  tiles = new TerrainRenderer();
   if (ION_KEY) {
     tiles.registerPlugin(
       new CesiumIonAuthPlugin({
@@ -3314,6 +3321,8 @@ async function startGame() {
   if (!gameReady || !tiles || !plane) {
     return menuFail("Still loading – tap Start again in a moment");
   }
+  if (el.start.disabled) return;
+  const request = ++soloStartRequest;
   el.start.disabled = true;
   el.menuError.textContent = "";
   try {
@@ -3321,6 +3330,7 @@ async function startGame() {
       const city = el.city.value.trim() || "Niepruszewo";
       el.menuError.textContent = `Looking up: ${city}…`;
       const loc = await geocodeCity(city);
+      if (request !== soloStartRequest) return;
       if (!loc) return menuFail(`Could not find “${city}”`);
       beginFlight(loc.lat, loc.lon);
     } else if (mode === "home") {
@@ -3328,6 +3338,7 @@ async function startGame() {
       if (!addr) return menuFail("Enter your address");
       el.menuError.textContent = "Looking up address…";
       const loc = await geocodeCity(addr);
+      if (request !== soloStartRequest) return;
       if (!loc) return menuFail("Could not find that address");
       homeTarget = loc;
       const start = offsetPoint(loc.lat, loc.lon, 20 + Math.random() * 10);
@@ -3342,6 +3353,7 @@ async function startGame() {
       beginFlight(p.lat, p.lon);
     }
   } catch (err) {
+    if (request !== soloStartRequest) return;
     console.error(err);
     menuFail(err.message || "Could not start. Try again.");
   }
@@ -3559,6 +3571,7 @@ el.restart.addEventListener("click", () => {
 });
 
 function backToMenu() {
+  soloStartRequest += 1;
   releaseLandscapeView();
   leaveSpaceFlight();
   hideBanner();
@@ -5900,9 +5913,17 @@ function tickFrame(testDt = null) {
   }
   if (awaitingSnap && performance.now() - awaitingSnapSince > 30000 && snapLastGh === null) {
     awaitingSnap = false; pendingSnap = false;
-    if (mp.active) { mp.launching = false; hideMpWait(); backToLobby(); }
-    else backToMenu();
-    showFatal(loadError || 'No terrain found at this location. Check map access or choose another departure.');
+    const message = loadError || 'No terrain found at this location. Check your connection and try again or choose another departure.';
+    clearStarting();
+    if (mp.active) {
+      mp.launching = false;
+      hideMpWait();
+      backToLobby();
+      setLobbyStatus(message, true);
+    } else {
+      backToMenu();
+      menuFail(message);
+    }
     return;
   }
   if (awaitingSnap && performance.now() - awaitingSnapSince > 20000 && snapLastGh !== null) {

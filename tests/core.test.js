@@ -407,6 +407,30 @@ test('faster aircraft have wider turns at the same bank', () => {
   assert.ok(slow.heading - Math.PI/2 > fast.heading - Math.PI/2);
 });
 
+test('all aircraft turn twice as far at cruise and boost with their existing bank', () => {
+  // Heading changes measured over two seconds before the global authority increase.
+  const profiles = [
+    [{cruise:48,boost:65,brake:30}, [0.27682820895561555, 0.2507845624772784]],
+    [{cruise:75,boost:185,brake:45}, [0.1758848453925541, 0.1374491210159281]],
+    [{cruise:92,boost:250,brake:55}, [0.1434074692243783, 0.1308641474177623]],
+    [{cruise:150,boost:420,brake:80,turnRate:4}, [0.5234565896972221, 0.5234565901920316]],
+    [{cruise:220,boost:600,brake:120,steering:1.2}, [0.1842363585300255, 0.18423635890965429]],
+  ];
+  for (const [spec, previousTurns] of profiles) for (const throttle of [0, 1]) for (const direction of [-1, 1]) {
+    const craft = new PlaneController(0, 0, 1000, 0, spec);
+    let turn = 0;
+    let lastHeading = craft.heading;
+    for (let i = 0; i < 120; i++) {
+      craft.update(1 / 60, {roll:direction * 0.7,pitch:0,throttle});
+      turn += Math.atan2(Math.sin(craft.heading - lastHeading), Math.cos(craft.heading - lastHeading));
+      lastHeading = craft.heading;
+    }
+    assert.ok(Math.abs(turn / previousTurns[throttle] - direction * 2) < 1e-6);
+    assert.ok(Math.abs(craft.roll) <= 0.63 * (spec.steering ?? 1));
+    assert.equal(Math.sign(craft.lon), direction, 'the position follows the tighter turn');
+  }
+});
+
 test('rocket steering profile turns more tightly over Earth', () => {
   const regular = new PlaneController(52, 16, 1000, 0, {cruise:220,boost:600,brake:120});
   const rocket = new PlaneController(52, 16, 1000, 0, {cruise:220,boost:600,brake:120,steering:1.2});
@@ -420,8 +444,9 @@ test('rocket steering profile turns more tightly over Earth', () => {
 });
 
 test('fighter doubles its already enhanced turn without exaggerating the visible bank', () => {
-  const regular = new PlaneController(52, 16, 1000, 0, {cruise:150,boost:420,brake:80,turnRate:2});
-  const fighter = new PlaneController(52, 16, 1000, 0, {cruise:150,boost:420,brake:80,turnRate:4});
+  // At the equator the measured turn is not affected by meridian convergence.
+  const regular = new PlaneController(0, 0, 1000, 0, {cruise:150,boost:420,brake:80,turnRate:2});
+  const fighter = new PlaneController(0, 0, 1000, 0, {cruise:150,boost:420,brake:80,turnRate:4});
   let regularTurn = 0;
   let fighterTurn = 0;
   let regularHeading = regular.heading;

@@ -14,6 +14,7 @@ import {
 } from "three";
 
 const R_EARTH = 6378137;
+const TURN_AUTHORITY = 2;
 
 // Cessna 172 — stylizowany low-poly: górnopłat, stelarze, podwozie, śmigło
 export function createPlaneMesh() {
@@ -190,7 +191,7 @@ export class PlaneController {
     // to complete a turn instead of feeling as if they hit an invisible wall.
     const physicalTurn = 9.81 * Math.abs(Math.tan(this.roll)) / Math.max(15, this.speed);
     const highSpeedTurn = Math.abs(Math.sin(this.roll)) * 0.12 * this.steering;
-    this.heading += -Math.sign(this.roll) * Math.max(physicalTurn, highSpeedTurn) * this.turnRate * dt;
+    this.heading += -Math.sign(this.roll) * Math.max(physicalTurn, highSpeedTurn) * this.turnRate * TURN_AUTHORITY * dt;
 
     // przeciągnięcie przy małej prędkości
     const stallSpeed = (this.brake + 4) / Math.sqrt(Math.max(0.2, Math.cos(this.roll)));

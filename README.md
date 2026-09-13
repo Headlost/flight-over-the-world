@@ -4,6 +4,10 @@
 
 Otwórz stronę, wybierz pojazd i rozpocznij **Free flight**. Gracz nie zakłada konta, nie instaluje programu i nie wpisuje żadnych tokenów ani kluczy. Najwięcej nowych możliwości oferują **Parachutist** i **Rocket**: można wylądować, chodzić, ponownie wystartować, wejść na orbitę, odwiedzać planety i odkryć pełną sekwencję czarnej dziury.
 
+## Zdjęcia z rozgrywki
+
+[Galeria — wszystkie 10 zdjęć w oryginalnej jakości](Flight%20over%20the%20word%20picture/README.md).
+
 ## Uruchomienie lokalne
 
 W Windows kliknij dwukrotnie `start-game.cmd`; skrypt zainstaluje brakujące zależności i otworzy grę przez lokalny serwer. Alternatywnie uruchom `npm install`, a następnie `npm start`. Nie otwieraj bezpośrednio pliku `index.html`, ponieważ moduły gry wymagają serwera Vite. Deweloperskie dane dostępu do terenu pozostają w ignorowanym pliku `.env.local`.

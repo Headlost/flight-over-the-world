@@ -82,6 +82,82 @@ test('online launcher has no credential form; adaptive rendering persists', asyn
   expect(errors).toEqual([]);
 });
 
+test('single player recovers from a terrain timeout and can start successive aircraft', async ({page}) => {
+  test.setTimeout(60000);
+  const errors = [];
+  page.on('pageerror', error => errors.push(error.message));
+  await page.goto('/');
+  await expect.poll(() => page.evaluate(() => !!window.__game)).toBe(true);
+  await page.clock.install();
+  await page.locator('#btn-solo').click();
+  await page.locator('#car-next').click();
+  await expect(page.locator('#car-name')).toHaveText('Dash 8 Q400');
+  await page.locator('#city-input').fill('52.249558, 20.985260');
+  await page.evaluate(() => window.__testTerrainLoading(null));
+  await page.locator('#start-btn').click();
+  await expect.poll(() => page.evaluate(() => window.__testReceiveLobbyMessage().awaitingSnap)).toBe(true);
+  await page.clock.fastForward(31000);
+  await expect(page.locator('#menu')).toBeVisible();
+  await expect(page.locator('#menu-error')).toContainText(/terrain|Terrain/);
+  await expect(page.locator('#start-btn')).toBeEnabled();
+  await expect(page.locator('#fatal')).toHaveClass(/hidden/);
+  expect(await page.evaluate(() => sessionStorage.getItem('fotw_starting'))).toBeNull();
+
+  for (const name of ['Dash 8 Q400', 'Cessna Citation']) {
+    await page.evaluate(() => window.__testTerrainLoading(20));
+    await page.locator('#start-btn').click();
+    await page.clock.runFor(2500);
+    await expect(page.locator('#menu')).toBeHidden();
+    expect(await page.evaluate(() => window.__game.plane.height)).toBeLessThan(1000);
+    await page.keyboard.press('Escape');
+    await page.locator('#btn-restart').click();
+    await expect(page.locator('#car-name')).toHaveText(name);
+    await expect(page.locator('#start-btn')).toBeEnabled();
+    if (name === 'Dash 8 Q400') await page.locator('#car-next').click();
+  }
+  expect(errors).toEqual([]);
+});
+
+test('leaving the single player menu cancels terrain loading and a pending location lookup', async ({page}) => {
+  const errors = [];
+  page.on('pageerror', error => errors.push(error.message));
+  await page.goto('/');
+  await expect.poll(() => page.evaluate(() => !!window.__game)).toBe(true);
+  await page.locator('#btn-solo').click();
+  await page.locator('#city-input').fill('52.249558, 20.985260');
+  await page.evaluate(() => window.__testTerrainLoading(null));
+  await page.locator('#start-btn').click();
+  await expect.poll(() => page.evaluate(() => window.__testReceiveLobbyMessage().awaitingSnap)).toBe(true);
+  await page.locator('#menu-back').click();
+  expect(await page.evaluate(() => window.__testReceiveLobbyMessage().awaitingSnap)).toBe(false);
+  await page.locator('#btn-solo').click();
+  await expect(page.locator('#start-btn')).toBeEnabled();
+
+  let releaseLookup;
+  const lookup = new Promise(resolve => { releaseLookup = resolve; });
+  let sawRequest;
+  const requested = new Promise(resolve => { sawRequest = resolve; });
+  await page.route('https://photon.komoot.io/api/**', async route => {
+    sawRequest();
+    await lookup;
+    await route.fulfill({contentType:'application/json',body:JSON.stringify({features:[{geometry:{coordinates:[21.01,52.23]}}]})});
+  });
+  await page.locator('#city-input').fill('Warsaw cancelled lookup');
+  await page.locator('#start-btn').click();
+  await requested;
+  await page.locator('#city-input').press('Enter');
+  await page.locator('#menu-back').click();
+  const response = page.waitForResponse('https://photon.komoot.io/api/**');
+  releaseLookup();
+  await (await response).finished();
+  await page.locator('#btn-solo').click();
+  await expect(page.locator('#start-btn')).toBeEnabled();
+  await expect(page.locator('#menu-error')).toBeEmpty();
+  await page.evaluate(() => window.__testTerrainLoading(20));
+  expect(await page.evaluate(() => window.__testReceiveLobbyMessage().awaitingSnap)).toBe(false);
+  expect(errors).toEqual([]);
+});
+
 test.describe('mobile terrain recovery', () => {
   test.use({
     viewport: {width: 393, height: 851},
