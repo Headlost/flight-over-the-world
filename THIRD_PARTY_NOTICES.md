@@ -36,6 +36,26 @@ SOFTWARE.
 
 ## Music
 
+### ELEZO — Reflection
+
+- Recording artist: **ELEZO**.
+- Composition and lyrics: **Enzo Morvan**, as listed in the [Shazam song credits](https://www.shazam.com/song/1772216970/reflection).
+- Release: *Reflection - Single*, **October 25, 2024**.
+- Label / recording notice: **Garden Cactus**, ℗ 2024 Garden Cactus.
+- Bundled file: `public/music/reflection.mp3`.
+- Use: looping background music in the menu, lobby and ordinary flight.
+- Release metadata: [Apple Music](https://music.apple.com/us/album/reflection-single/1772216969).
+
+### Hans Zimmer — No Time for Caution
+
+- Composer and catalog recording artist: **Hans Zimmer**.
+- Soundtrack: *Interstellar (Original Motion Picture Soundtrack)*, **2014**, including the *Expanded Edition*.
+- Label credited for the cited release: **WaterTower Music**.
+- Bundled file: `public/music/no-time-for-caution.mp3`.
+- Use: the black-hole gravity well, event-horizon transit and tesseract finale.
+- Track metadata: [Apple Music](https://music.apple.com/us/song/1533985267).
+- Release metadata: [Apple Music Classical](https://classical.music.apple.com/us/album/1533983552).
+
 Music recordings under `public/music/` are supplied by the project owner for
 use in this experience. Their inclusion does not place those recordings under
 the source-code license; all recording and composition rights remain with

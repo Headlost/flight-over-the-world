@@ -97,11 +97,64 @@ Geometria orbit, atmosfer, galaktyki i czarnej dziury powstaje proceduralnie dop
 
 ## Muzyka i dźwięk
 
-- Muzyka tła: **Reflection** (`public/music/reflection.mp3`), odtwarzana podczas zwykłego lotu.
-- Sekwencja czarnej dziury: **Hans Zimmer — No Time for Caution**, z albumu *Interstellar: Original Motion Picture Soundtrack* (`public/music/no-time-for-caution.mp3`). Głośność utworu narasta wraz ze zbliżaniem się do centrum, a finał jest synchronizowany z przejściem przez horyzont i tesserakt.
-- Dźwięki silników, strumienia powietrza i eksplozji są generowane lub miksowane w czasie rzeczywistym przez moduły audio gry. Eksplozja łączy szerokopasmową falę uderzeniową, niski szum ciśnieniowy i krótkie trzaski odłamków bez tonalnego „uderzenia w bęben”.
+### Muzyka tła — ELEZO: Reflection
 
-Pliki muzyczne zostały dostarczone przez właściciela repozytorium. Repozytorium nie nadaje licencji do ponownego wykorzystania tych nagrań; osoba publikująca wdrożenie odpowiada za posiadanie praw wymaganych do ich publicznego odtwarzania.
+| Informacja | Szczegóły |
+| --- | --- |
+| Tytuł | **Reflection** |
+| Wykonawca | **ELEZO** |
+| Autor muzyki i tekstu | **Enzo Morvan**, według [credits utworu w Shazam](https://www.shazam.com/song/1772216970/reflection) |
+| Wydanie | *Reflection - Single* |
+| Data wydania | **25 października 2024** |
+| Gatunek w katalogu | Electronic / muzyka elektroniczna |
+| Wytwórnia / oznaczenie nagrania | **Garden Cactus**, ℗ 2024 Garden Cactus |
+| Plik w grze | [reflection.mp3](public/music/reflection.mp3) |
+
+Dane wydania potwierdza [Apple Music](https://music.apple.com/us/album/reflection-single/1772216969). Profil wykonawcy jest dostępny także w [Spotify](https://open.spotify.com/artist/16fvZPgLo7dLodDQoH0GGI).
+
+„Reflection” jest zapętloną muzyką tła w menu, lobby i podczas zwykłego lotu. Podstawowa głośność odtwarzacza wynosi 22%. Przy pojawieniu się **GRAVITY WELL** utwór płynnie cichnie, ustępując muzyce sekwencji czarnej dziury. Po zakończeniu tej sekwencji muzyka tła ponownie narasta.
+
+### Sekwencja czarnej dziury — Hans Zimmer: No Time for Caution
+
+| Informacja | Szczegóły |
+| --- | --- |
+| Tytuł | **No Time for Caution** |
+| Kompozytor i wykonawca wskazany w katalogu | **Hans Zimmer** |
+| Ścieżka filmowa | *Interstellar (Original Motion Picture Soundtrack)*, 2014; utwór dostępny m.in. w *Expanded Edition* |
+| Wytwórnia wskazana dla wydania | **WaterTower Music** |
+| Plik w grze | [no-time-for-caution.mp3](public/music/no-time-for-caution.mp3) |
+
+Informacje o utworze: [Apple Music](https://music.apple.com/us/song/1533985267). Dane wydania i wytwórni: [Apple Music Classical](https://classical.music.apple.com/us/album/1533983552).
+
+Przy wejściu w studnię grawitacyjną odtwarzanie zaczyna się od **45. sekundy lokalnego pliku**, a głośność rośnie wraz ze zbliżaniem do czarnej dziury. Podstawowy poziom tej ścieżki wynosi 48%. Po przekroczeniu horyzontu gra wybiera końcowy fragment nagrania pasujący do około **23,2 sekundy** przejścia przez czerń, odliczanie i tesserakt. Krótkie obniżenie głośności pozwala muzyce ponownie narastać; podczas finału jej docelowy poziom może osiągnąć około 61,4%. Film tesseraktu jest odtwarzany z wyciszoną własną ścieżką audio, więc nadal słychać muzykę sterowaną przez grę.
+
+### Parametry dołączonych plików
+
+| Plik | Długość pliku | Format | Próbkowanie | Kanały | Przepływność |
+| --- | --- | --- | --- | --- | --- |
+| `reflection.mp3` | 3 min 11,834 s | MP3 | 48 kHz | Stereo | 320 kb/s |
+| `no-time-for-caution.mp3` | 4 min 0,048 s | MP3 | 48 kHz | Stereo | 320 kb/s |
+
+Parametry zostały odczytane z plików w repozytorium za pomocą `ffprobe`. Podane długości dotyczą plików dołączonych do gry. Odtwarzanie i przejścia między utworami obsługuje [music.js](src/game/music.js).
+
+### Efekty dźwiękowe
+
+Dźwięki pojazdów i opływu powietrza są generowane w czasie rzeczywistym przez Web Audio API. Wysokość brzmienia, filtry i głośność reagują na przepustnicę oraz prędkość lotu.
+
+| Profil | Pojazdy | Brzmienie |
+| --- | --- | --- |
+| `plane` | Piper PA-28, Dash 8 Q400 | Pulsujący dźwięk napędu śmigłowego, niski pomruk i szum powietrza |
+| `jet` | Cessna Citation, Fighter | Wyższy świst turbiny i mocniejszy opływ powietrza |
+| `rocket` | Rocket | Niski ryk napędu, silny bas i intensywny szum |
+| `wind` | Parachutist | Szum powietrza zależny od prędkości |
+
+Eksplozja składa się z trzech nakładanych warstw: początkowego trzasku i szerokopasmowego huku trwającego około 1,55 s, niskiego szumu ciśnieniowego wygasającego przez około 2,25 s oraz sześciu krótkich, nieregularnych trzasków odłamków. Filtry i kompresor kształtują siłę uderzenia. Implementacja: [engineSound.js](src/game/engineSound.js) i [explosion.js](src/game/explosion.js).
+
+### Sterowanie muzyką i informacje o prawach
+
+Przyciski **Music on / Music off** w menu, lobby i podczas rozgrywki sterują obydwoma utworami. Gra zapamiętuje wybór w przeglądarce. Efekty pojazdów działają niezależnie od przełącznika muzyki. Jeśli przeglądarka zablokuje automatyczne odtwarzanie, kliknięcie lub naciśnięcie klawisza pozwala grze ponowić uruchomienie audio.
+
+Pliki muzyczne zostały dostarczone przez właściciela repozytorium. Repozytorium nie nadaje licencji do ponownego wykorzystania tych nagrań; osoba publikująca wdrożenie odpowiada za posiadanie praw wymaganych do ich publicznego odtwarzania. Oznaczenia autorów i nagrań znajdują się również w [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md#music).
 
 ## Grafika
 
