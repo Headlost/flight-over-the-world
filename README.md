@@ -6,7 +6,30 @@ Otwórz stronę, wybierz pojazd i rozpocznij **Free flight**. Gracz nie zakłada
 
 ## Zdjęcia z rozgrywki
 
-[Galeria — wszystkie 10 zdjęć w oryginalnej jakości](Flight%20over%20the%20word%20picture/README.md).
+Kliknij zdjęcie, aby otworzyć je w oryginalnej jakości.
+
+<table>
+  <tr>
+    <td><a href="Flight%20over%20the%20word%20picture/Zrzut%20ekranu%20%2830%29.png"><img src="Flight%20over%20the%20word%20picture/Zrzut%20ekranu%20%2830%29.png" alt="Zrzut ekranu z rozgrywki (30)" width="440"></a></td>
+    <td><a href="Flight%20over%20the%20word%20picture/Zrzut%20ekranu%20%2831%29.png"><img src="Flight%20over%20the%20word%20picture/Zrzut%20ekranu%20%2831%29.png" alt="Zrzut ekranu z rozgrywki (31)" width="440"></a></td>
+  </tr>
+  <tr>
+    <td><a href="Flight%20over%20the%20word%20picture/Zrzut%20ekranu%20%2832%29.png"><img src="Flight%20over%20the%20word%20picture/Zrzut%20ekranu%20%2832%29.png" alt="Zrzut ekranu z rozgrywki (32)" width="440"></a></td>
+    <td><a href="Flight%20over%20the%20word%20picture/Zrzut%20ekranu%20%2840%29.png"><img src="Flight%20over%20the%20word%20picture/Zrzut%20ekranu%20%2840%29.png" alt="Zrzut ekranu z rozgrywki (40)" width="440"></a></td>
+  </tr>
+  <tr>
+    <td><a href="Flight%20over%20the%20word%20picture/Zrzut%20ekranu%20%2842%29.png"><img src="Flight%20over%20the%20word%20picture/Zrzut%20ekranu%20%2842%29.png" alt="Zrzut ekranu z rozgrywki (42)" width="440"></a></td>
+    <td><a href="Flight%20over%20the%20word%20picture/Zrzut%20ekranu%20%2846%29.png"><img src="Flight%20over%20the%20word%20picture/Zrzut%20ekranu%20%2846%29.png" alt="Zrzut ekranu z rozgrywki (46)" width="440"></a></td>
+  </tr>
+  <tr>
+    <td><a href="Flight%20over%20the%20word%20picture/Zrzut%20ekranu%20%2850%29.png"><img src="Flight%20over%20the%20word%20picture/Zrzut%20ekranu%20%2850%29.png" alt="Zrzut ekranu z rozgrywki (50)" width="440"></a></td>
+    <td><a href="Flight%20over%20the%20word%20picture/Zrzut%20ekranu%20%2852%29.png"><img src="Flight%20over%20the%20word%20picture/Zrzut%20ekranu%20%2852%29.png" alt="Zrzut ekranu z rozgrywki (52)" width="440"></a></td>
+  </tr>
+  <tr>
+    <td><a href="Flight%20over%20the%20word%20picture/Zrzut%20ekranu%20%2854%29.png"><img src="Flight%20over%20the%20word%20picture/Zrzut%20ekranu%20%2854%29.png" alt="Zrzut ekranu z rozgrywki (54)" width="440"></a></td>
+    <td><a href="Flight%20over%20the%20word%20picture/Zrzut%20ekranu%20%2857%29.png"><img src="Flight%20over%20the%20word%20picture/Zrzut%20ekranu%20%2857%29.png" alt="Zrzut ekranu z rozgrywki (57)" width="440"></a></td>
+  </tr>
+</table>
 
 ## Uruchomienie lokalne
 
