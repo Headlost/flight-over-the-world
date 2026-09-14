@@ -1,6 +1,6 @@
 # Publiczna dystrybucja źródeł
 
-Pełny projekt deweloperski pozostaje lokalnie. Publiczny eksport pomija sześć modułów wymienionych w scripts/public-source-manifest.json i zastępuje je komentarzami o pominięciu implementacji. Pozostałe śledzone pliki są kopiowane z aktualnej wersji roboczej. Oznaczenia nie zmieniają praw do wcześniejszego kodu projektu, zależności ani wkładu osób trzecich.
+Pełny projekt deweloperski pozostaje lokalnie. Publiczny eksport pomija moduły wymienionych w scripts/public-source-manifest.json i zastępuje je komentarzami o pominięciu implementacji. Pozostałe śledzone pliki są kopiowane z aktualnej wersji roboczej. Oznaczenia nie zmieniają praw do wcześniejszego kodu projektu, zależności ani wkładu osób trzecich.
 
 Przygotowanie: node scripts/export-public-source.mjs. Wynik jest nowym katalogiem .public-export z README i OMITTED-MODULES.md. Eksport nie zawiera pliku .env.local, historii Git, starych workflow budujących prywatne moduły, odpowiednich testów ani skompilowanej gry. Wykrycie ciągu wyglądającego jak JWT w pliku tekstowym zatrzymuje eksport. Eksport nie jest samodzielnym projektem możliwym do przebudowania bez prywatnej części.
 
@@ -12,7 +12,7 @@ Referencje: [widoczność repozytoriów](https://docs.github.com/en/repositories
 
 Docelowa publikacja: gałąź codex/public-source zawiera świeży eksport z pominięciami i jest domyślnym widokiem GitHuba. Gałąź codex/site zawiera wyłącznie gotowe pliki dist i jest źródłem GitHub Pages (bez ponownego budowania prywatnych modułów). Poprzedni workflow Deploy trzeba wyłączyć, aby nie nadpisywał strony starą wersją z main. Pełnego lokalnego main nie wypychać; jego commity z nową implementacją pozostają lokalne. Stara zdalna gałąź main i jej historia nie są usuwane, więc wcześniejsze źródła nadal są publiczne.
 
-Zgodnie z priorytetem użytkownika nie kierujemy strumienia kafelków przez n8n bez pomiaru wydajności. Bieżąca publikacja zachowuje bezpośredni dostęp do terenu, a tokeny autoryzacji są dostępne w kliencie. Jest to zaakceptowany kompromis dla płynności; nie nazywać tokenów ukrytymi ani zahaszowanymi. Tajne dane wymagają integracji serwerowej i osobnego wdrożenia. Użytkownik zrezygnował z wdrażania n8n; N8N-TERRAIN.md pozostaje nieaktywną notatką.
+Zgodnie z priorytetem użytkownika nie kierujemy strumienia kafelków przez n8n bez pomiaru wydajności. Bieżąca publikacja zachowuje bezpośredni dostęp do terenu, a tokeny autoryzacji są dostępne w kliencie. Jest to zaakceptowany kompromis dla płynności; nie nazywać tokenów ukrytymi ani zahaszowanymi. Tajne dane wymagają integracji serwerowej i osobnego wdrożenia. Nowsza decyzja użytkownika dopuszcza osobny workflow n8n wyłącznie do przydzielania i odnawiania sesji, bez pośrednictwa w strumieniu kafelków. Integracja nie jest jeszcze włączona w opublikowanej grze.
 
 Konfiguracja na 14.09.2026: codex/public-source jest domyślną gałęzią GitHuba; GitHub Pages korzysta z codex/site jako gałęzi gotowego builda. Stary workflow Deploy jest wyłączony. Publikację potwierdzić przez stan builda Pages i zgodność plików online z lokalnym dist. Pełny commit deweloperski a60e26e pozostaje lokalny.
 

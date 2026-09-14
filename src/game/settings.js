@@ -12,6 +12,7 @@ const saved = readSettings();
 export const settings = {
   quality: QUALITY[saved.quality] ? saved.quality : 'performance',
   adaptive: saved.adaptive !== false,
+  terrainPoolEndpoint: (import.meta.env.VITE_TERRAIN_POOL_ENDPOINT || '').trim(),
   ion: import.meta.env.VITE_CESIUM_ION_KEY || '',
   ionTokens: ionTokenList(import.meta.env.VITE_CESIUM_ION_KEY, import.meta.env.VITE_CESIUM_ION_FALLBACK_KEYS),
 };

@@ -9,3 +9,8 @@ playwright-report/
 .netlify
 
 .public-export/
+
+# Private terrain pool state/configuration
+server/*.private.json
+server/*.sqlite*
+server/n8n/*.private.json

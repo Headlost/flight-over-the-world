@@ -10,10 +10,11 @@
     "preview": "vite preview --host 127.0.0.1",
     "test": "node --test tests/*.test.js",
     "test:e2e": "playwright test",
-    "prebuild": "npm test"
+    "prebuild": "npm test",
+    "test:terrain-pool": "node --test server/n8n/*.test.js"
   },
   "engines": {
-    "node": ">=22"
+    "node": ">=22.13"
   },
   "dependencies": {
     "3d-tiles-renderer": "^0.5.2",
