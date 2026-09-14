@@ -61,6 +61,16 @@ function bodyPatch(side, z0, z1, angle0, angle1, offset = 0.006) {
   });
 }
 
+function forwardBoarDecal(geometry, side) {
+  // The artwork faces +U. Mirror the port decal so both heads face the -Z nose,
+  // while keeping lettering in its independently readable side orientation.
+  if (side < 0) {
+    const uv = geometry.attributes.uv;
+    for (let i = 0; i < uv.count; i++) uv.setX(i, 1 - uv.getX(i));
+  }
+  return geometry;
+}
+
 function wingPoint(side, span, chord, offset = 0) {
   const rootChord = 1.94, tipChord = 1.31;
   const c = rootChord + (tipChord - rootChord) * span;
@@ -278,7 +288,7 @@ export function createDzikiDzikMesh({ boarTexture } = {}) {
   const intake = ellipsoid(plane, rubber, [0,-0.245,-2.925], [0.19,0.075,0.018], "Lower cowl air intake");
   intake.rotation.x = 0.17;
   for (const side of [-1,1]) {
-    if (boarMat) add(bodyPatch(side,-2.47,-0.92,-0.48,1.03),boarMat,plane,"Silver boar / red eye");
+    if (boarMat) add(forwardBoarDecal(bodyPatch(side,-2.47,-0.92,-0.48,1.03),side),boarMat,plane,"Silver boar / red eye");
     if (titleMat) add(bodyPatch(side,-0.72,1.5,-0.05,0.84),titleMat,plane,"Dziki Dzik brush lettering");
     tube([[-2.75,0.1],[-2.2,0.37],[-1.3,0.42],[-0.4,0.33],[0.6,0.25],[1.9,0.13],[3.15,0.035]]
       .map(([z,y]) => [side*(bodyAt(z)[0]+0.008)*0.72,y,z]),0.023,red);
@@ -362,7 +372,7 @@ export function createDzikiDzikMesh({ boarTexture } = {}) {
       number.position.set(side*0.055,0.42,2.80); number.rotation.y=side*Math.PI/2;
     }
     if(boarMat) {
-      const mark=add(new PlaneGeometry(0.49,0.45),boarMat,plane,"Fin boar crest");
+      const mark=add(forwardBoarDecal(new PlaneGeometry(0.49,0.45),side),boarMat,plane,"Fin boar crest");
       mark.position.set(side*0.056,0.88,2.65); mark.rotation.y=side*Math.PI/2;
     }
   }
