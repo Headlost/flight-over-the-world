@@ -3,6 +3,8 @@ import { disposeModel } from './game/dispose.js';
 import { QUALITY, renderRatio, AdaptiveQuality, terrainStreamProfile } from './game/quality.js';
 import { geocodeCity, setupLocationPicker } from './game/location.js';
 import { TerrainRenderer } from './game/terrainRenderer.js';
+import { IonTokenRotation } from './game/ionTokens.js';
+import { RotatingCesiumIonAuthPlugin } from './game/rotatingIonAuth.js';
 import {
   validMessage,
   escapeHtml,
@@ -32,7 +34,6 @@ import {
   TileCompressionPlugin,
   UnloadTilesPlugin,
   GLTFExtensionsPlugin,
-  CesiumIonAuthPlugin,
 } from "3d-tiles-renderer/plugins";
 import {
   Scene,
@@ -291,7 +292,8 @@ const GUESS_SCOPES = {
   },
 };
 
-const ION_KEY = settings.ion;
+const ionTokenRotation = new IonTokenRotation(settings.ionTokens);
+const ION_KEY = ionTokenRotation.currentToken;
 const TERRAIN_ALT = 120; // przybliżona wysokość elipsoidalna nizin
 
 // Access depends on the provider account, enabled asset, region and quotas.
@@ -2876,8 +2878,8 @@ function init() {
   tiles = new TerrainRenderer();
   if (ION_KEY) {
     tiles.registerPlugin(
-      new CesiumIonAuthPlugin({
-        apiToken: ION_KEY,
+      new RotatingCesiumIonAuthPlugin({
+        tokenRotation: ionTokenRotation,
         assetId: ION_GOOGLE_TILES_ASSET,
         autoRefreshToken: true,
         useRecommendedSettings: false,

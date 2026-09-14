@@ -12,6 +12,6 @@ export default defineConfig({
     url:'http://127.0.0.1:5179',
     reuseExistingServer:false,
     // Keep fixture tests independent of the developer's real map credentials.
-    env:{ VITE_CESIUM_ION_KEY:'test-only', VITE_GEOCODING_URL:'https://photon.komoot.io/api/' },
+    env:{ VITE_CESIUM_ION_KEY:'test-only', VITE_CESIUM_ION_FALLBACK_KEYS:'test-fallback-1,test-fallback-2', VITE_GEOCODING_URL:'https://photon.komoot.io/api/' },
   },
 });

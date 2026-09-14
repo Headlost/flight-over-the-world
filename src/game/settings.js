@@ -1,4 +1,5 @@
 import { QUALITY } from './quality.js';
+import { ionTokenList } from './ionTokens.js';
 
 function readSettings() {
   try {
@@ -12,6 +13,7 @@ export const settings = {
   quality: QUALITY[saved.quality] ? saved.quality : 'performance',
   adaptive: saved.adaptive !== false,
   ion: import.meta.env.VITE_CESIUM_ION_KEY || '',
+  ionTokens: ionTokenList(import.meta.env.VITE_CESIUM_ION_KEY, import.meta.env.VITE_CESIUM_ION_FALLBACK_KEYS),
 };
 try { sessionStorage.removeItem('fotw-keys'); } catch { /* old setup is no longer used */ }
 

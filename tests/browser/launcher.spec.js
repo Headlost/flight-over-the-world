@@ -82,6 +82,33 @@ test('online launcher has no credential form; adaptive rendering persists', asyn
   expect(errors).toEqual([]);
 });
 
+test('terrain authentication rotates a rejected token before loading Google tiles', async ({page}) => {
+  const requests = [];
+  const errors = [];
+  page.on('pageerror', error => errors.push(error.message));
+  await page.route('https://api.cesium.com/v1/assets/2275207/endpoint*', async route => {
+    const token = new URL(route.request().url()).searchParams.get('access_token');
+    requests.push(token);
+    await route.fulfill({status:token === 'test-only' ? 401 : 200,contentType:'application/json',body:JSON.stringify({
+      type:'3DTILES',externalType:'3DTILES',options:{url:'https://tile.googleapis.com/v1/3dtiles/root.json?key=fixture-google-key'},
+    })});
+  });
+  let googleRequests = 0;
+  await page.route('https://tile.googleapis.com/**', async route => {
+    googleRequests += 1;
+    await route.fulfill({contentType:'application/json',body:JSON.stringify({asset:{version:'1.1'},geometricError:0,
+      root:{boundingVolume:{sphere:[0,0,0,6378137]},geometricError:0,children:[]}})});
+  });
+  await page.goto('/');
+  await page.locator('#btn-solo').click();
+  await page.locator('#city-input').fill('52.249558, 20.985260');
+  await page.locator('#start-btn').click();
+  await expect.poll(() => requests.length).toBe(2);
+  await expect.poll(() => googleRequests).toBeGreaterThan(0);
+  expect(requests).toEqual(['test-only','test-fallback-1']);
+  expect(errors).toEqual([]);
+});
+
 test('single player recovers from a terrain timeout and can start successive aircraft', async ({page}) => {
   test.setTimeout(60000);
   const errors = [];
