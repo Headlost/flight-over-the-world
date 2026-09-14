@@ -8,6 +8,8 @@ Sterowanie jest niezależne od zwykłych samolotów. W/S pozwala wykonywać peł
 
 Symulacja wykorzystuje quaternion i stały krok 240 Hz. Renderowanie samolotu, płynna kamera oraz przesyłanie i interpolacja pozy multiplayer zachowują pełną orientację przy przechodzeniu przez pion. Wznowienie sesji również zachowuje quaternion. Lekki kontakt z innym graczem nie ogranicza samolotu do kątów zwykłego modelu lotu.
 
+Po ustabilizowaniu pomiaru terenu Dziki dzik rozpoczyna lot na wysokości 180 m nad powierzchnią; w multiplayer wysokość wspólnego startu wyznacza pojazd hosta.
+
 Dwa osobne wyloty emitują lekki biały dym. Z i przycisk Smoke on/off przełączają emisję. Na telefonie dodatkowe przyciski Turn left/right sterują szybkimi zwrotami. Jedna operacja rysowania obsługuje całą pulę dymu: maksymalnie 640 cząstek na komputerze i 384 na telefonie, około 540/360 w ustalonym locie. Gęstość 90/60 par na sekundę ogranicza przerwy pomiędzy smugami podczas szybkiego lotu. Cząstki zanikają po 3 sekundach. Ich rozmiar jest ograniczony do 80 pikseli; wygaszanie przy kamerze i test głębokości chronią widoczność. Dane świata pozostają w precyzji Float64, a przesyłane do GPU pozycje są względne wobec samolotu, co eliminuje jitter wynikający z milionowych współrzędnych Ziemi.
 
 Grafika dzika jest oryginalnym zasobem wygenerowanym przez image_gen, z prawdziwym kanałem alpha. Ostateczny prompt i ścieżka: public/textures/dziki-dzik/LIVERY.md. Tekstury napisów powstają raz przy budowaniu modelu; nie są malowane ponownie podczas lotu.

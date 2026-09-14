@@ -1,12 +1,12 @@
 > Publiczny eksport z pominiętymi modułami. Zobacz [OMITTED-MODULES.md](OMITTED-MODULES.md). Pełne źródła i kompilacja są utrzymywane osobno.
 
-[![Flight Over the World — główne zdjęcie z lotu nad miastem](Flight%20over%20the%20word%20picture/glowne.png)](Flight%20over%20the%20word%20picture/glowne.png)
+[![Flight Over the World + — główne zdjęcie z lotu nad miastem](Flight%20over%20the%20word%20picture/glowne.png)](Flight%20over%20the%20word%20picture/glowne.png)
 
-# Flight Over the World 2.0 — online
+# Flight Over the World + — gra online
 
 **Graj:** https://headlost.github.io/flight-over-the-world/
 
-Otwórz stronę, wybierz pojazd i rozpocznij **Free flight**. Gracz nie zakłada konta, nie instaluje programu i nie wpisuje żadnych tokenów ani kluczy. **Dziki dzik** pozwala wykonywać pełne pętle i beczki z podwójnym dymem akrobacyjnym. **Parachutist** i **Rocket** pozwalają wylądować, chodzić, ponownie wystartować, wejść na orbitę, odwiedzać planety i odkryć pełną sekwencję czarnej dziury.
+Otwórz stronę, wybierz pojazd i rozpocznij **Free flight**. Gracz nie zakłada konta, nie instaluje programu i nie wpisuje żadnych tokenów ani kluczy. **Dziki dzik** rozpoczyna lot 180 m nad powierzchnią i pozwala wykonywać bardzo szybkie zwroty, pełne pętle i beczki z dwiema białymi smugami dymu. **Parachutist** i **Rocket** pozwalają wylądować, chodzić, ponownie wystartować, wejść na orbitę, odwiedzać planety i odkryć pełną sekwencję czarnej dziury.
 
 ## Zdjęcia z rozgrywki
 
@@ -39,12 +39,14 @@ Kliknij zdjęcie, aby otworzyć je w oryginalnej jakości.
 
 W Windows kliknij dwukrotnie `start-game.cmd`; skrypt zainstaluje brakujące zależności i otworzy grę przez lokalny serwer. Alternatywnie uruchom `npm install`, a następnie `npm start`. Nie otwieraj bezpośrednio pliku `index.html`, ponieważ moduły gry wymagają serwera Vite. Deweloperskie dane dostępu do terenu pozostają w ignorowanym pliku `.env.local`.
 
-## Od wersji 1.0 do 2.0
+## Możliwości gry
 
-Wersja 1.0 była punktem startowym zaimportowanym jako fork wcześniejszego projektu. Wersja 2.0 jest gruntowną przebudową doświadczenia, renderowania i mechaniki. Zachowuje ideę swobodnego przelotu nad światem, ale wymienia lub rozbudowuje niemal każdą część widoczną dla gracza:
+Swobodny lot nad fotorealistycznym światem, akrobacje, spacery po mieście i podróże kosmiczne w jednej grze przeglądarkowej:
 
-- jeden prosty tryb **Free flight** zamiast Guess the region i Fly home;
+- tryb **Free flight**, bez limitu czasu na odkrywanie świata;
 - wybór startu przez tekst, współrzędne lub pinezkę na bezpłatnej mapie OpenStreetMap;
+- multiplayer ze wspólnymi pokojami, lokalizacją wybraną przez gospodarza i rozmową głosową;
+- samolot **Dziki dzik** z pełnymi pętlami, lotem odwróconym, beczkami i bardzo szybkimi zwrotami oraz podwójnym białym dymem akrobacyjnym;
 - spadochroniarz z lotem, bezpiecznym lądowaniem na ulicach i dachach, chodzeniem, widokiem pierwszoosobowym i ponownym startem;
 - rakieta z pionowym startem, orbitami, hiperprędkością, pełnym Układem Słonecznym i powrotem przez atmosferę Ziemi;
 - wejścia atmosferyczne i niskie loty nad teksturowanymi powierzchniami Merkurego, Wenus, Księżyca oraz Marsa;
@@ -82,7 +84,7 @@ Na telefonie użyj drążka dotykowego. W multiplayer wyślij znajomemu link do 
 
 ### Dziki dzik
 
-Czarny samolot akrobacyjny z czerwonymi końcówkami, grafikami dzika, oznaczeniem **01**, czterołopatowym śmigłem, kabiną pilota i stałym podwoziem. Wybierz go w karuzeli pojazdów: z początkowego Pipera wystarczy jedno kliknięcie strzałki w lewo. Sterowanie pozwala na pełne pętle dodatnie i ujemne, lot odwrócony oraz beczki w obu kierunkach, również przy jednoczesnym użyciu kilku osi. Nie ma automatycznego poziomowania. Prędkość przelotowa wynosi 306 km/h, a maksymalna 576 km/h. Kamera płynnie podąża za orientacją samolotu podczas przechodzenia przez pion. Na telefonie dodatkowe przyciski **Turn left / Turn right** obsługują szybkie zwroty. Przycisk **Smoke on / off** i klawisz `Z` sterują dwiema białymi smugami.
+Czarny samolot akrobacyjny z czerwonymi końcówkami, grafikami dzika, oznaczeniem **01**, czterołopatowym śmigłem, kabiną pilota i stałym podwoziem. Wybierz go w karuzeli pojazdów: z początkowego Pipera wystarczy jedno kliknięcie strzałki w lewo. Rozpoczyna lot 180 m nad powierzchnią wybranego miejsca. Sterowanie pozwala na bardzo szybkie zwroty, pełne pętle dodatnie i ujemne, lot odwrócony oraz beczki w obu kierunkach, również przy jednoczesnym użyciu kilku osi. Nie ma automatycznego poziomowania. Prędkość przelotowa wynosi 306 km/h, a maksymalna 576 km/h. Kamera płynnie podąża za orientacją samolotu podczas przechodzenia przez pion. Na telefonie dodatkowe przyciski **Turn left / Turn right** obsługują szybkie zwroty. Przycisk **Smoke on / off** i klawisz `Z` sterują dwiema białymi smugami.
 
 ### Spadochroniarz
 
@@ -154,7 +156,7 @@ Dźwięki pojazdów i opływu powietrza są generowane w czasie rzeczywistym prz
 
 | Profil | Pojazdy | Brzmienie |
 | --- | --- | --- |
-| `plane` | Piper PA-28, Dash 8 Q400 | Pulsujący dźwięk napędu śmigłowego, niski pomruk i szum powietrza |
+| `plane` | Piper PA-28, Dash 8 Q400, Dziki dzik | Pulsujący dźwięk napędu śmigłowego, niski pomruk i szum powietrza |
 | `jet` | Cessna Citation, Fighter | Wyższy świst turbiny i mocniejszy opływ powietrza |
 | `rocket` | Rocket | Niski ryk napędu, silny bas i intensywny szum |
 | `wind` | Parachutist | Szum powietrza zależny od prędkości |
@@ -178,3 +180,5 @@ Szczegóły map doczytują się przez Internet. Gra używa Google Photorealistic
 Gracze nie konfigurują usług. Fotorealistyczny teren nadal pochodzi z Cesium / Google, a dostęp zapewnia konfiguracja publikowanej strony. Nie oznacza to całkowitej niezależności od zewnętrznych usług.
 
 Instrukcje utrzymania strony i testów znajdują się w [docs/MAINTENANCE.md](docs/MAINTENANCE.md). [Przegląd poprawek i ograniczeń](docs/REVIEW.md). [Pełny opis zmian z 11 września 2026](docs/CHANGES_2026-09-11.md).
+
+Projekt rozpoczął się od wersji 1.0, zaimportowanej jako fork wcześniejszego projektu; informacje o autorach i licencjach pozostają w [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
