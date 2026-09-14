@@ -14,3 +14,6 @@ playwright-report/
 server/*.private.json
 server/*.sqlite*
 server/n8n/*.private.json
+
+# Local, user-confirmed performance checkpoints
+.local-baselines/
