@@ -9,3 +9,5 @@ GitHub Pages uses the compiled codex/site branch. The old Deploy workflow buildi
 Gameplay quality takes priority. Maintain visible terrain sharpness and resolution. Do not proxy every map tile through n8n without measuring throughput and frame behavior. Current frontend tokens are client-visible; never claim GitHub Secrets, hashing or minification makes a client credential secret. Never print real credentials or commit .env.local. Future server-side migration needs separate validation.
 
 Validate full private development with npm run build and browser tests relevant to changes before generating distributions.
+
+Latest user decision on 2026-09-14: do not deploy n8n integration. Keep the game terrain requests direct. The n8n architecture document is inactive reference material. Do not resume n8n credential recovery or deployment unless the user explicitly requests it again.

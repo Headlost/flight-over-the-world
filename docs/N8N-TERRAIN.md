@@ -1,4 +1,6 @@
-# Prywatny dostęp do terenu z n8n
+# Prywatny dostęp do terenu z n8n — niewdrażane
+
+Decyzja użytkownika z 14.09.2026: nie wdrażamy integracji n8n. Gra zachowuje bezpośrednie pobieranie terenu. Poniższy projekt architektury jest jedynie nieaktywną notatką; nie realizować go bez nowego zlecenia.
 
 Stan na 14.09.2026: adres istniejącej instancji `https://box.zakai.eu` odnaleziono w konfiguracji projektu BotaniQ. Odczytowe sprawdzenie `/healthz` i `/healthz/readiness` zwróciło HTTP 200 oraz `status: ok`. Publiczne `/rest/settings` udostępnia wyłącznie ograniczone ustawienia; nie potwierdzono wersji, Cloud/self-hosted ani autoryzowanego dostępu do API. Dokumentacja innych projektów wspomina Caddy, co wskazuje na możliwy self-hosting, ale nie dowodzi konfiguracji działającej instancji.
 
