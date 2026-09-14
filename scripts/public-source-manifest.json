@@ -37,7 +37,8 @@
     "tests/ionTokens.test.js",
     "tests/monthlyBudget.test.js",
     "tests/poolServer.test.js",
-    "tests/terrainPoolAuth.test.js"
+    "tests/terrainPoolAuth.test.js",
+    "tests/browser/terrain-continuity.spec.js"
   ],
   "notice": "Implementacja pominięta w publicznym eksporcie źródeł. Prawa autorskie pozostają przy właściwych autorach; oznaczenie nie zmienia licencji zależności ani wkładu osób trzecich."
 }

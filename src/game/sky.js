@@ -27,6 +27,9 @@ export function createSky(fogColorHex, { simple = false } = {}) {
       void main() {
         vDir = position;
         gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+        // The camera-centred dome can exceed the scene's far plane. Draw it at
+        // far depth so terrain transitions always reveal sky, not the clear buffer.
+        gl_Position.z = gl_Position.w;
       }
     `,
     fragmentShader: /* glsl */ `

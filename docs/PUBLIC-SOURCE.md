@@ -17,3 +17,5 @@ Zgodnie z priorytetem użytkownika nie kierujemy strumienia kafelków przez n8n 
 Konfiguracja na 14.09.2026: codex/public-source jest domyślną gałęzią GitHuba; GitHub Pages korzysta z codex/site jako gałęzi gotowego builda. Stary workflow Deploy jest wyłączony. Publikację potwierdzić przez stan builda Pages i zgodność plików online z lokalnym dist. Pełny commit deweloperski a60e26e pozostaje lokalny.
 
 Potwierdzone wdrożenie: build Pages 8e4a381c3f4dd9570a488aeb5967f5c4af4e552f ma status built. Plik index.html i sprawdzone pliki JS/CSS online odpowiadają lokalnemu dist. Test online: zmiana kursu 0, jedna kamera terenu, errorTarget 7, resolutionScale 1, brak błędów strony.
+
+Nowsze wdrożenie poprawki migania terenu: build Pages b707c2d2e0f65fc37c39ec84ca19c250ae85a835 ma status built. Wszystkie 8 plików index.html/JS/CSS online są identyczne z lokalnym dist. Kompilacja i 119 testów lokalnych oraz 18 wybranych testów przeglądarkowych przeszły. Sprawdzono także uruchomienie menu gry online. Szczegóły regresji: docs/TERRAIN-CONTINUITY.md. Pełny commit implementacji bbad75c pozostaje lokalny; stary workflow Deploy nadal jest disabled_manually.
