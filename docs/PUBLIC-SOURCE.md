@@ -14,4 +14,4 @@ Docelowa publikacja: gałąź codex/public-source zawiera świeży eksport z pom
 
 Zgodnie z priorytetem użytkownika nie kierujemy strumienia kafelków przez n8n bez pomiaru wydajności. Bieżąca publikacja zachowuje bezpośredni dostęp do terenu, a tokeny autoryzacji są dostępne w kliencie. Jest to zaakceptowany kompromis dla płynności; nie nazywać tokenów ukrytymi ani zahaszowanymi. Tajne dane wymagają integracji serwerowej i osobnego wdrożenia. Dokumentacja n8n: N8N-TERRAIN.md.
 
-Stan wdrożenia należy potwierdzić po publikacji sprawdzeniem źródła Pages, aktywnego builda i zawartości obu gałęzi.
+Konfiguracja na 14.09.2026: codex/public-source jest domyślną gałęzią GitHuba; GitHub Pages korzysta z codex/site jako gałęzi gotowego builda. Stary workflow Deploy jest wyłączony. Publikację potwierdzić przez stan builda Pages i zgodność plików online z lokalnym dist. Pełny commit deweloperski a60e26e pozostaje lokalny.

@@ -1,6 +1,8 @@
 # Prywatny dostęp do terenu z n8n
 
-Stan na 14.09.2026: przygotowano projekt architektury i sprawdzono dokumentację dostawcy. Nie podano jeszcze adresu instancji, wariantu Cloud/self-hosted ani dostępu. Nie utworzono workflow i nie wdrożono proxy. Dotychczasowy klient nadal używa tokenów z `VITE_*`; ten dokument nie zmienia sposobu ich publikacji.
+Stan na 14.09.2026: adres istniejącej instancji `https://box.zakai.eu` odnaleziono w konfiguracji projektu BotaniQ. Odczytowe sprawdzenie `/healthz` i `/healthz/readiness` zwróciło HTTP 200 oraz `status: ok`. Publiczne `/rest/settings` udostępnia wyłącznie ograniczone ustawienia; nie potwierdzono wersji, Cloud/self-hosted ani autoryzowanego dostępu do API. Dokumentacja innych projektów wspomina Caddy, co wskazuje na możliwy self-hosting, ale nie dowodzi konfiguracji działającej instancji.
+
+Sprawdzono dokumentację dostawcy. Nie utworzono workflow i nie wdrożono proxy. Dotychczasowy klient nadal używa tokenów z `VITE_*`; ten dokument nie zmienia sposobu ich publikacji. Priorytetem jest zachowanie płynności i jakości gry.
 
 ## Co potwierdza dokumentacja n8n
 
@@ -17,6 +19,12 @@ Przy self-hosted n8n uruchomić obok niego stale działające proxy Node.js. Rev
 
 Przy n8n Cloud potrzebny jest osobny hosting tego samego proxy. Sam dostęp do panelu Cloud nie daje możliwości uruchomienia obok niego własnego procesu Node; Execute Command nie jest dostępny na Cloud. [Execute Command](https://docs.n8n.io/integrations/builtin/core-nodes/n8n-nodes-base.executecommand)
 
+## Wariant z pojedynczym wywołaniem przy starcie
+
+Broker n8n może pobrać endpoint ion z prywatnym tokenem i przekazać grze dostęp do Google. Dalsze kafelki płyną wtedy bezpośrednio od Google, więc n8n nie dodaje pośrednictwa do każdego pobrania podczas lotu. Broker wymaga pomiaru czasu startu i zachowania jednej sesji; dotychczasowe krótkie pomiary healthchecka nie mierzą wydajności workflow.
+
+Ten wariant może ukryć długotrwałą kolejkę tokenów ion, lecz nie ukryje klucza Google ani uprawnień potrzebnych przeglądarce do bezpośredniego pobierania. Pełne ukrycie obu rodzajów kluczy wymaga proxy całego strumienia opisanego niżej. Hash lub obfuskacja tokenu w kliencie nie zapewnia jego poufności: usługa nadal potrzebuje poprawnego oryginalnego poświadczenia.
+
 ## Wymagany kontrakt proxy
 
 1. Prawdziwa kolejka ion znajduje się wyłącznie po stronie serwera, np. w `CESIUM_ION_TOKENS`, bez prefiksu `VITE_`. Frontend otrzymuje tylko `VITE_TERRAIN_PROXY_URL` i krótkotrwały identyfikator sesji proxy. Kolejka uwzględnia token główny; rotacja następuje po ion 401, bez przełączania kont po limitach i zwykłych błędach sieci.
@@ -27,7 +35,7 @@ Przy n8n Cloud potrzebny jest osobny hosting tego samego proxy. Sam dostęp do p
 
 ## Warunki przełączenia gry
 
-Najpierw potrzebne są: adres i wersja n8n, Cloud/self-hosted, dostęp do konfiguracji workflow oraz miejsce i dostęp do wdrożenia proxy z publicznym HTTPS. Przy self-hosted trzeba potwierdzić zasoby serwera, pasmo i konfigurację reverse proxy. Przy Cloud trzeba sprawdzić plan i równoległość, jeśli rozważamy prototyp przez webhooki.
+Adres n8n jest już znany. Nadal potrzebne są: wersja i potwierdzenie Cloud/self-hosted, autoryzowany dostęp do konfiguracji workflow oraz, dla pełnego proxy, miejsce i dostęp do wdrożenia z publicznym HTTPS. W wykonanym odczytowym sprawdzeniu lokalnych konfiguracji i pamięci nie potwierdzono dostępnego klucza API n8n; klucz administratora aplikacji Guardian QR jest odrębnym poświadczeniem. Przy self-hosted trzeba potwierdzić zasoby serwera, pasmo i konfigurację reverse proxy. Przy Cloud trzeba sprawdzić plan i równoległość, jeśli rozważamy prototyp przez webhooki.
 
 Przed publikacją sprawdzić brak prawdziwych JWT i klucza Google w buildzie oraz całym ruchu klienta; przepisywanie zagnieżdżonych adresów; poprawne bajty plików; równoległe żądania i anulowanie; zachowanie sesji. Porównać czas do pierwszego ostrego widoku, opóźnienia pobierania i przerwy w klatkach z obecnym rozwiązaniem podczas startu, szybkiego lotu, obrotu o 180° i lądowania. Nie obiecywać braku spowolnienia przed tym pomiarem.
 
