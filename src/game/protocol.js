@@ -1,12 +1,19 @@
 const TYPES = new Set(['hello','bye','welcome','roster','scope','mode','city','plane','name','chat','ready','talk','presence','moderate','muted','removed','resume','bump','snapped','go','rematch','start','pose','guess','done','roundEnd']);
 const GUEST_TYPES = new Set(['hello','bye','plane','name','chat','ready','talk','presence','moderate','bump','snapped','rematch','pose','guess','done']);
-const PLANES = new Set(['pa28','q400','citation','jet','rocket','parachutist']);
+const PLANES = new Set(['pa28','q400','citation','jet','rocket','parachutist','dzikiDzik']);
 const PLAYER_ROLES = new Set(['admin','leader','player']);
 const finite = (n, low, high) => typeof n === 'number' && Number.isFinite(n) && n >= low && n <= high;
 const location = d => finite(d.lat,-90,90) && finite(d.lon,-180,180);
 const spaceVector = d => finite(d.x,-1e7,1e7) && finite(d.y,-1e7,1e7) && finite(d.z,-1e7,1e7)
   && finite(d.fx,-1,1) && finite(d.fy,-1,1) && finite(d.fz,-1,1);
 const rotation = d => finite(d.qx,-1,1) && finite(d.qy,-1,1) && finite(d.qz,-1,1) && finite(d.qw,-1,1);
+const ROTATION_FIELDS = ['qx','qy','qz','qw'];
+const aerobaticRotation = d => {
+  // Legacy peers may omit the entire attitude; a partially received or invalid
+  // quaternion must not reach slerp or discard the aircraft's inverted attitude.
+  if (!ROTATION_FIELDS.some(key => Object.hasOwn(d,key))) return true;
+  return rotation(d) && Math.abs(d.qx*d.qx + d.qy*d.qy + d.qz*d.qz + d.qw*d.qw - 1) <= 1e-3;
+};
 export const PLAYER_NAME_MAX = 24;
 export const CHAT_MESSAGE_MAX = 280;
 export const MULTIPLAYER_PROTOCOL_VERSION = 2;
@@ -105,12 +112,14 @@ export function validMessage(data, fromGuest = false) {
     if (data.space === true) {
       if (data.plane !== 'rocket' || !spaceVector(data) || !rotation(data)) return false;
     } else if (!location(data) || !finite(data.h,-12000,1e7) || !finite(data.heading,-1e5,1e5) || !finite(data.pitch,-Math.PI,Math.PI) || !finite(data.roll,-Math.PI,Math.PI)) return false;
+    if (data.space !== true && data.plane === 'dzikiDzik' && !aerobaticRotation(data)) return false;
   }
   if (data.t === 'resume') {
     if (!data.pose || typeof data.pose !== 'object' || typeof data.pose.space !== 'boolean') return false;
     if (data.pose.space) {
       if (data.plane !== 'rocket' || !spaceVector(data.pose) || !rotation(data.pose) || !finite(data.pose.motion,0,5000)) return false;
     } else if (!location(data.pose) || !finite(data.pose.h,-12000,1e7) || !finite(data.pose.heading,-1e5,1e5) || !finite(data.pose.pitch,-Math.PI,Math.PI) || !finite(data.pose.roll,-Math.PI,Math.PI)) return false;
+    if (!data.pose.space && data.plane === 'dzikiDzik' && !aerobaticRotation(data.pose)) return false;
   }
   if (data.t === 'bump' && (typeof data.target !== 'string' || data.target.length < 3 || data.target.length > 80 || !finite(data.ix,-8,8) || !finite(data.iy,-8,8) || !finite(data.iz,-8,8))) return false;
   if (data.t === 'moderate' && (!['mute','kick','approve'].includes(data.action) || typeof data.target !== 'string' || data.target.length < 3 || data.target.length > 80 || (data.action === 'mute' && typeof data.muted !== 'boolean') || (data.action === 'approve' && typeof data.approved !== 'boolean'))) return false;

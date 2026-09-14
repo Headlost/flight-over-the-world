@@ -6,7 +6,7 @@
 
 **Graj:** https://headlost.github.io/flight-over-the-world/
 
-Otwórz stronę, wybierz pojazd i rozpocznij **Free flight**. Gracz nie zakłada konta, nie instaluje programu i nie wpisuje żadnych tokenów ani kluczy. Najwięcej nowych możliwości oferują **Parachutist** i **Rocket**: można wylądować, chodzić, ponownie wystartować, wejść na orbitę, odwiedzać planety i odkryć pełną sekwencję czarnej dziury.
+Otwórz stronę, wybierz pojazd i rozpocznij **Free flight**. Gracz nie zakłada konta, nie instaluje programu i nie wpisuje żadnych tokenów ani kluczy. **Dziki dzik** pozwala wykonywać pełne pętle i beczki z podwójnym dymem akrobacyjnym. **Parachutist** i **Rocket** pozwalają wylądować, chodzić, ponownie wystartować, wejść na orbitę, odwiedzać planety i odkryć pełną sekwencję czarnej dziury.
 
 ## Zdjęcia z rozgrywki
 
@@ -63,6 +63,9 @@ Wybrane miejsce jest startem Free flight. W multiplayer lokalizację wybiera gos
 | --- | --- |
 | W / S | Nos w dół / w górę; spadochroniarzem łagodne wznoszenie / szybsze opadanie |
 | A / D | Przechylenie i zakręt |
+| W / S, A / D — Dziki dzik | Pełne pętle w dół / w górę, beczki w lewo / w prawo |
+| Q / E — Dziki dzik | Bardzo szybki zwrot w lewo / w prawo |
+| Z — Dziki dzik | Włączenie / wyłączenie podwójnego dymu |
 | Shift / Ctrl | Szybciej / wolniej; w kosmosie hiperprędkość / lot precyzyjny |
 | Prawy przycisk myszy i przeciąganie | Obrót kamery; skierowanie widoku w górę pomaga spadochroniarzowi nabierać wysokości po starcie; w kosmosie działa też lewy przycisk |
 | Kółko myszy | Zoom |
@@ -76,6 +79,10 @@ Wybrane miejsce jest startem Free flight. W multiplayer lokalizację wybiera gos
 | 0 / − | Kurs na centrum Drogi Mlecznej / Słońce |
 
 Na telefonie użyj drążka dotykowego. W multiplayer wyślij znajomemu link do pokoju.
+
+### Dziki dzik
+
+Czarny samolot akrobacyjny z czerwonymi końcówkami, grafikami dzika, oznaczeniem **01**, czterołopatowym śmigłem, kabiną pilota i stałym podwoziem. Wybierz go w karuzeli pojazdów: z początkowego Pipera wystarczy jedno kliknięcie strzałki w lewo. Sterowanie pozwala na pełne pętle dodatnie i ujemne, lot odwrócony oraz beczki w obu kierunkach, również przy jednoczesnym użyciu kilku osi. Nie ma automatycznego poziomowania. Prędkość przelotowa wynosi 306 km/h, a maksymalna 576 km/h. Kamera płynnie podąża za orientacją samolotu podczas przechodzenia przez pion. Na telefonie dodatkowe przyciski **Turn left / Turn right** obsługują szybkie zwroty. Przycisk **Smoke on / off** i klawisz `Z` sterują dwiema białymi smugami.
 
 ### Spadochroniarz
 

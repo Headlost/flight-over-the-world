@@ -9,6 +9,10 @@
       "description": "Kontroler lotu i ruchu pojazdów."
     },
     {
+      "path": "src/game/aerobaticPlane.js",
+      "description": "Kontroler pełnego lotu akrobacyjnego."
+    },
+    {
       "path": "src/game/terrainRenderer.js",
       "description": "Optymalizacja doczytywania i pomiarów terenu."
     },
@@ -32,6 +36,7 @@
   "excludedPaths": [
     ".github/workflows/pages.yml",
     "tests/core.test.js",
+    "tests/aerobaticPlane.test.js",
     "tests/terrainView.test.js",
     "tests/googleTileSession.test.js",
     "tests/ionTokens.test.js",
@@ -41,6 +46,7 @@
     "tests/browser/terrain-continuity.spec.js",
     "tests/broker-only/terrainPoolStart.spec.js",
     "tests/broker-only/terrainPoolContinuity.spec.js",
+    "tests/broker-only/dzikiDzik.spec.js",
     "playwright.broker-only.config.js"
   ],
   "notice": "Implementacja pominięta w publicznym eksporcie źródeł. Prawa autorskie pozostają przy właściwych autorach; oznaczenie nie zmienia licencji zależności ani wkładu osób trzecich."

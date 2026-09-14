@@ -133,7 +133,7 @@
           <button id="start-btn" type="button">Start</button>
         </div>
         <p id="menu-error"></p>
-          <p class="hint hint-desk"><kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd> steer · parachutist: <kbd>S</kbd> descend and slow, hold <kbd>W</kbd> to climb gently · <kbd>Space</kbd> gentle takeoff · rocket: <kbd>R</kbd> orbit, <kbd>Shift</kbd> hyperdrive, <kbd>E</kbd> descend · <kbd>Esc</kbd> pause<br>Right-drag to look around · scroll fully in for first-person · space targets: <kbd>1–9</kbd> planets, <kbd>0</kbd> Galactic Core · <kbd>C</kbd> reset camera</p>
+          <p class="hint hint-desk"><kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd> steer · Dziki dzik: <kbd>W/S</kbd> loops, <kbd>A/D</kbd> rolls, <kbd>Q/E</kbd> rapid turns, <kbd>Z</kbd> smoke · parachutist: <kbd>Space</kbd> gentle takeoff · rocket: <kbd>R</kbd> orbit, <kbd>Shift</kbd> hyperdrive, <kbd>E</kbd> descend · <kbd>Esc</kbd> pause<br>Right-drag to look around · scroll fully in for first-person · space targets: <kbd>1–9</kbd> planets, <kbd>0</kbd> Galactic Core · <kbd>C</kbd> reset camera</p>
           <p class="hint hint-touch">For the best controls, rotate your phone sideways · drag the stick to steer</p>
       </div>
     </div>
@@ -211,6 +211,8 @@
         <button id="touch-action" type="button" hidden>Gentle takeoff</button>
         <button id="touch-special" type="button" hidden>High takeoff</button>
         <button id="touch-enter" type="button" hidden>Descend</button>
+        <button id="touch-yaw-left" class="acro-control" type="button" aria-label="Turn Dziki dzik left">↶ Turn left</button>
+        <button id="touch-yaw-right" class="acro-control" type="button" aria-label="Turn Dziki dzik right">↷ Turn right</button>
         <button id="touch-talk" type="button" hidden>Talk</button>
       </div>
     </div>
@@ -218,6 +220,7 @@
     <div id="game-tools" hidden aria-label="Game controls">
       <button id="music-game-toggle" type="button" aria-pressed="false">🔊 Music on</button>
       <button id="landscape-toggle" type="button" aria-pressed="false" aria-label="Switch to landscape view" title="Landscape view">↻</button>
+      <button id="acro-smoke-toggle" class="acro-control" type="button" aria-pressed="true">Smoke on · Z</button>
     </div>
 
     <nav id="space-nav" aria-label="Space navigation" hidden>

@@ -57,7 +57,7 @@ export function createCarousel(canvas, items, opts = {}) {
     renderer.setSize(w, h, false);
     camera.aspect = w / h;
     camera.updateProjectionMatrix();
-    if (current) frame(current.wingspan);
+    if (current) frame(current.wingspan, models.get(currentKey)?.item);
   }
 
   function frame(wingspan, item = null) {
@@ -79,8 +79,7 @@ export function createCarousel(canvas, items, opts = {}) {
   }
 
   for (const item of items) {
-    loader.load(item.file, (gltf) => {
-      const model = item.build ? item.build(gltf) : gltf.scene;
+    const register = (model) => {
       if (item.prepare) item.prepare(model); // np. poza czarownicy + miotła
       const box = new Box3().setFromObject(model);
       const size = box.getSize(new Vector3());
@@ -88,17 +87,19 @@ export function createCarousel(canvas, items, opts = {}) {
       box.setFromObject(model);
       model.position.sub(box.getCenter(new Vector3()));
       model.traverse((o) => {
-        if (o.isMesh && o.material) {
+        if (o.isMesh && o.material && !item.preserveMaterials) {
           o.material.metalness = 0.15;
           o.material.roughness = 0.65;
         }
       });
       const group = new Group();
       group.add(model);
-      applyRotorState(group, false);
+      if (!model.userData.customProp) applyRotorState(group, false);
       models.set(item.key, { group, wingspan: item.wingspan, item });
       if (item.key === wantedKey && currentKey !== wantedKey) show(item.key);
-    });
+    };
+    if (item.procedural) register(item.build());
+    else loader.load(item.file, (gltf) => register(item.build ? item.build(gltf) : gltf.scene));
   }
 
   let active = true;

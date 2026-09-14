@@ -4,6 +4,7 @@ Implementacja pominięta w publicznym eksporcie źródeł. Prawa autorskie pozos
 
 - src/main.js: Orkiestracja rozgrywki i integracja prywatnych modułów.
 - src/game/plane.js: Kontroler lotu i ruchu pojazdów.
+- src/game/aerobaticPlane.js: Kontroler pełnego lotu akrobacyjnego.
 - src/game/terrainRenderer.js: Optymalizacja doczytywania i pomiarów terenu.
 - src/game/googleTileSession.js: Obsługa sesji dostępu do terenu.
 - src/game/rotatingIonAuth.js: Integracja autoryzacji terenu.

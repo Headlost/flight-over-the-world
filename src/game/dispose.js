@@ -10,7 +10,9 @@ export function disposeModel(root) {
       for (const value of Object.values(material)) if (value?.isTexture) textures.add(value);
     }
   });
-  for (const texture of textures) texture.dispose();
+  // Explicit page-lifetime model caches can be used by several live aircraft.
+  // Removing one instance must not invalidate the other instances' GPU texture.
+  for (const texture of textures) if (texture.userData?.sharedModelTexture !== true) texture.dispose();
   for (const material of materials) material.dispose();
   for (const geometry of geometries) geometry.dispose();
 }

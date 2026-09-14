@@ -1,6 +1,7 @@
 import { test, expect } from '@playwright/test';
 
 test.beforeEach(async ({context}) => {
+  await context.route('https://box.zakai.eu/**', route => route.fulfill({status:403,body:'Production session admission disabled in fixture tests'}));
   await context.route('https://api.cesium.com/**', route => route.fulfill({status:403,body:'Terrain disabled in fixture tests'}));
   await context.route('https://tile.openstreetmap.org/**', route => route.fulfill({contentType:'image/png',body:Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAusB9Wl6kWQAAAAASUVORK5CYII=','base64')}));
 });
@@ -9,6 +10,16 @@ async function openPicker(page) {
   await page.locator('#menu [data-mode=free]').click();
   await page.locator('#menu .pick-location').click();
   await expect(page.locator('#pin-status')).toContainText('Click the map');
+}
+
+async function chooseVehicle(page, name, lobby = false) {
+  const prefix = lobby ? '#lobby-car' : '#car';
+  const label = page.locator(`${prefix}-name`);
+  for (let clicks = 0; clicks <= 10; clicks++) {
+    if ((await label.textContent())?.trim() === name) return;
+    if (clicks < 10) await page.locator(`${prefix}-next`).click();
+  }
+  throw new Error(`Vehicle ${name} was not available in the carousel`);
 }
 
 async function flushMultiplayerControls(clients) {
@@ -38,8 +49,7 @@ async function startFixtureRound(clients, vehicle = 'pa28', release = true) {
   }));
   const host = clients[0].page;
   if (vehicle === 'rocket') {
-    await host.locator('#lobby-car-prev').click();
-    await host.locator('#lobby-car-prev').click();
+    await chooseVehicle(host, 'Rocket', true);
   }
   await host.locator('#lobby-city').fill('52.38871, 16.60069');
   await host.locator('#lobby-vehicle-lock').click();
@@ -556,7 +566,7 @@ test('a public handshake uses an authoritative locked vehicle spawn and never re
   });
   await page.locator('[data-player-id="public-player"] .approval-toggle').check();
   await page.locator('#lobby-city').fill('48.8584, 2.2945');
-  await page.locator('#lobby-car-prev').click();
+  await chooseVehicle(page, 'Parachutist', true);
   await page.locator('#lobby-vehicle-lock').click();
   await page.evaluate(() => window.__testReceiveLobbyMessage({t:'ready',ready:true}, 'public-player'));
   await page.locator('#lobby-start').click();
@@ -598,7 +608,7 @@ test('separate clients obey the vehicle lock, wait for leaders and allow a queue
   await page.locator('[data-player-id="test-player-1"] .leader-toggle').click();
   await page.locator('[data-player-id="test-player-2"] .approval-toggle').check();
   await page.locator('#lobby-city').fill('48.8584, 2.2945');
-  await page.locator('#lobby-car-prev').click();
+  await chooseVehicle(page, 'Parachutist', true);
   await page.locator('#lobby-vehicle-lock').click();
   await flushMultiplayerControls(clients);
   for (const guest of [leader,queued]) {
@@ -661,8 +671,7 @@ test('a queued rocket joins near the host even after the host has entered space'
     await client.page.evaluate(index => window.__testPopulateLobby(2,index > 0), index);
   }));
   await page.locator('[data-player-id="test-player-1"] .approval-toggle').check();
-  await page.locator('#lobby-car-prev').click();
-  await page.locator('#lobby-car-prev').click();
+  await chooseVehicle(page, 'Rocket', true);
   await page.locator('#lobby-city').fill('48.8584, 2.2945');
   await page.locator('#lobby-vehicle-lock').click();
   await flushMultiplayerControls(clients);
@@ -1143,7 +1152,7 @@ test('parachutist is selectable and its animated model is bundled', async ({page
   expect((await model.body()).subarray(0, 4).toString()).toBe('glTF');
   await page.goto('/');
   await page.getByRole('button',{name:'Single player',exact:true}).click();
-  await page.locator('#car-prev').click();
+  await chooseVehicle(page, 'Parachutist');
   await expect(page.locator('#car-name')).toHaveText('Parachutist');
   await expect(page.locator('#car-desc')).toContainText('Land on roofs or streets');
   await expect(page.locator('body')).toHaveClass(/parachutist-selected/);
@@ -1355,8 +1364,7 @@ test('aircraft keeps its course while terrain loading stretches frame times', as
 test('rocket launcher advertises orbital controls and exposes every destination', async ({page}) => {
   await page.goto('/');
   await page.getByRole('button',{name:'Single player',exact:true}).click();
-  await page.locator('#car-prev').click();
-  await page.locator('#car-prev').click();
+  await chooseVehicle(page, 'Rocket');
   await expect(page.locator('#car-name')).toHaveText('Rocket');
   await expect(page.locator('#car-desc')).toContainText('R vertical launch to orbit');
   await expect(page.locator('#space-targets button')).toHaveCount(11);
