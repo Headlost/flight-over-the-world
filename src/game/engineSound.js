@@ -1,4 +1,5 @@
 import { getAudioCtx } from "./explosion.js";
+import { loadAmbientVolume, saveAmbientVolume } from "./ambientVolume.js";
 
 // Proceduralne dźwięki napędu + opływ powietrza (WebAudio).
 // Zapętlone bezszwowo, wysokość i głośność podążają za obrotami i prędkością.
@@ -8,6 +9,29 @@ import { getAudioCtx } from "./explosion.js";
 let built = false;
 let master, lp, exhaustGain, subGain, noiseGain, bp, am, amDepth;
 let osc1, osc2, sub;
+let ambientVolume = loadAmbientVolume();
+let lastAudible = false;
+let masterTarget = null;
+
+function applyMasterGain(ctx, audible, response) {
+  const target = audible ? 0.14 * ambientVolume : 0;
+  if (target === masterTarget) return;
+  master.gain.setTargetAtTime(target, ctx.currentTime, response);
+  masterTarget = target;
+}
+
+export function getAmbientVolume() {
+  return ambientVolume;
+}
+
+export function setAmbientVolume(value) {
+  ambientVolume = saveAmbientVolume(value);
+  // Changing a slider must not create/resume an AudioContext. If the graph
+  // already exists, its engine and wind master follows the new level smoothly.
+  const ctx = getAudioCtx();
+  if (ctx && built) applyMasterGain(ctx, lastAudible, 0.06);
+  return ambientVolume;
+}
 
 function build(ctx) {
   built = true;
@@ -89,12 +113,13 @@ const STYLES = {
 // audible — czy słychać (lot, nie menu/pauza/kraksa)
 // rpm01 — obroty 0..1 (Shift = nitro podbija), speed01 — prędkość 0..1
 export function updateEngineSound(audible, rpm01, speed01, style = "plane") {
+  lastAudible = !!audible;
   const ctx = getAudioCtx();
   if (!ctx) return;
   if (!built) build(ctx);
   const t = ctx.currentTime;
 
-  master.gain.setTargetAtTime(audible ? 0.14 : 0, t, audible ? 0.3 : 0.06);
+  applyMasterGain(ctx, lastAudible, audible ? 0.3 : 0.06);
   if (!audible) return;
 
   const S = STYLES[style] || STYLES.plane;
@@ -119,6 +144,8 @@ export function engineDebug() {
   return {
     ctxState: ctx ? ctx.state : null,
     built,
+    ambientVolume,
+    masterTarget,
     masterGain: master ? Math.round(master.gain.value * 1000) / 1000 : null,
   };
 }

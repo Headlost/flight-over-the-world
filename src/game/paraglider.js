@@ -1,16 +1,6 @@
-import {
-  BoxGeometry,
-  BufferGeometry,
-  CylinderGeometry,
-  Float32BufferAttribute,
-  Group,
-  LineBasicMaterial,
-  LineSegments,
-  MathUtils,
-  Mesh,
-  MeshStandardMaterial,
-  SphereGeometry,
-} from "three";
+import { Group, MathUtils } from 'three';
+import { createParachutistCharacter } from './parachutistCharacter.js';
+import { createParachutistCanopy, updateParachutistSuspension } from './parachutistCanopy.js';
 
 const R_EARTH = 6378137;
 // A brisk, predictable walking pace. Keeping it constant makes precise movement
@@ -39,141 +29,10 @@ export function parachutistDescentScale(groundClearance) {
   return 1 + smooth * 0.5;
 }
 
-function createCanopy() {
-  const group = new Group();
-  group.name = "parachute-canopy";
-  const points = [];
-  const indices = [];
-  const span = 9.2;
-  const chord = 2.8;
-  const arch = 2.45;
-  const segX = 28;
-  const segZ = 10;
-
-  for (let iz = 0; iz <= segZ; iz++) {
-    const tz = iz / segZ;
-    for (let ix = 0; ix <= segX; ix++) {
-      const tx = ix / segX;
-      const x = (tx - 0.5) * span;
-      const edge = Math.sin(tx * Math.PI);
-      const z = (tz - 0.5) * chord * (0.86 + edge * 0.14);
-      const y = arch * edge - 0.16 * Math.sin(tz * Math.PI);
-      points.push(x, y, z);
-    }
-  }
-  for (let iz = 0; iz < segZ; iz++) {
-    for (let ix = 0; ix < segX; ix++) {
-      const a = iz * (segX + 1) + ix;
-      const b = a + 1;
-      const c = a + segX + 1;
-      const d = c + 1;
-      indices.push(a, c, b, b, c, d);
-    }
-  }
-  const geometry = new BufferGeometry();
-  geometry.setAttribute("position", new Float32BufferAttribute(points, 3));
-  geometry.setIndex(indices);
-  geometry.computeVertexNormals();
-  const canopy = new Mesh(geometry, new MeshStandardMaterial({
-    color: 0xf04b23,
-    roughness: 0.58,
-    metalness: 0,
-    side: 2,
-  }));
-  canopy.position.y = 6.2;
-  canopy.castShadow = true;
-  group.add(canopy);
-
-  const linePoints = [];
-  for (let i = 0; i <= 10; i++) {
-    const tx = i / 10;
-    const x = (tx - 0.5) * span;
-    const y = 6.2 + arch * Math.sin(tx * Math.PI);
-    for (const z of [-chord * 0.42, chord * 0.42]) {
-      linePoints.push(x, y, z, x * 0.09, 1.25, z * 0.06);
-    }
-  }
-  const lineGeometry = new BufferGeometry();
-  lineGeometry.setAttribute("position", new Float32BufferAttribute(linePoints, 3));
-  group.add(new LineSegments(lineGeometry, new LineBasicMaterial({
-    color: 0xe8edf2,
-    transparent: true,
-    opacity: 0.72,
-  })));
-  return group;
-}
-
-function material(color, roughness = 0.78, metalness = 0.02) {
-  return new MeshStandardMaterial({ color, roughness, metalness });
-}
-
-function part(geometry, surface, parent, position) {
-  const mesh = new Mesh(geometry, surface);
-  mesh.position.set(...position);
-  mesh.castShadow = true;
-  mesh.receiveShadow = true;
-  parent.add(mesh);
-  return mesh;
-}
-
-function limb(parent, x, y, radius, length, surface) {
-  const joint = new Group();
-  joint.position.set(x, y, 0);
-  parent.add(joint);
-  part(new CylinderGeometry(radius * 0.82, radius, length, 10), surface, joint, [0, -length / 2, 0]);
-  return joint;
-}
-
-function createPilot() {
-  const pilot = new Group();
-  pilot.name = "stable-procedural-pilot";
-  const jacket = material(0x52683f, 0.9);
-  const trousers = material(0x202b31, 0.92);
-  const harness = material(0x161b1f, 0.7);
-  const helmet = material(0xd9e1e4, 0.38, 0.12);
-  const visor = material(0x172d3b, 0.2, 0.35);
-  const gloves = material(0x171b1e, 0.84);
-  const boots = material(0x111416, 0.94);
-
-  const body = new Group();
-  body.position.y = 0.92;
-  pilot.add(body);
-  part(new CylinderGeometry(0.26, 0.32, 0.75, 12), jacket, body, [0, 0.34, 0]);
-  part(new BoxGeometry(0.48, 0.56, 0.2), harness, body, [0, 0.28, 0.19]);
-  part(new BoxGeometry(0.38, 0.42, 0.22), harness, body, [0, 0.27, 0.31]);
-  part(new SphereGeometry(0.22, 16, 12), helmet, body, [0, 0.95, 0]);
-  const face = part(new SphereGeometry(0.18, 14, 10), visor, body, [0, 0.94, -0.11]);
-  face.scale.set(0.88, 0.62, 0.55);
-
-  const arms = [];
-  for (const side of [-1, 1]) {
-    const upper = limb(body, side * 0.34, 0.65, 0.09, 0.48, jacket);
-    upper.rotation.z = -side * 0.12;
-    const lower = limb(upper, 0, -0.48, 0.075, 0.43, jacket);
-    part(new SphereGeometry(0.095, 10, 8), gloves, lower, [0, -0.45, 0]);
-    arms.push({ upper, lower, side });
-  }
-
-  const legs = [];
-  for (const side of [-1, 1]) {
-    const upper = limb(body, side * 0.16, 0, 0.115, 0.56, trousers);
-    const lower = limb(upper, 0, -0.55, 0.09, 0.52, trousers);
-    const boot = part(new BoxGeometry(0.18, 0.15, 0.35), boots, lower, [0, -0.55, -0.08]);
-    legs.push({ upper, lower, boot, side });
-  }
-  const roleSurfaces = [jacket, trousers, harness, helmet].map(surface => ({
-    surface,
-    color: surface.color.getHex(),
-    emissive: surface.emissive.getHex(),
-    emissiveIntensity: surface.emissiveIntensity,
-  }));
-  return { pilot, body, arms, legs, roleSurfaces, phase: 0 };
-}
-
 export function createParachutistModel() {
   const root = new Group();
-  const canopy = createCanopy();
-  const character = createPilot();
+  const character = createParachutistCharacter();
+  const canopy = createParachutistCanopy(character);
   root.add(character.pilot, canopy);
   root.userData.parachutist = { canopy, character, active: "airborne" };
   root.userData.key = "parachutist";
@@ -226,13 +85,18 @@ export function updateParachutistModel(root, state, speed, dt) {
   const armStride = 0.72;
   const legStride = 0.28;
 
+  if (model.headGroup) {
+    model.headGroup.rotation.y = approach(model.headGroup.rotation.y, moving ? Math.sin(model.phase * 0.42) * 0.12 : 0, step);
+    model.headGroup.rotation.x = approach(model.headGroup.rotation.x, state === "grounded" ? gait * 0.025 : -0.045, step);
+  }
+
   model.body.position.y = approach(model.body.position.y, state === "grounded" ? 0.92 + Math.abs(Math.sin(model.phase * 2)) * (moving ? 0.035 : 0) : 0.82, step);
   model.body.rotation.x = approach(model.body.rotation.x, state === "grounded" ? 0 : -0.14, step);
   for (const arm of model.arms) {
     const groundSwing = gait * armStride * arm.side;
-    arm.upper.rotation.x = approach(arm.upper.rotation.x, state === "grounded" ? groundSwing : 0.78, step);
-    arm.upper.rotation.z = approach(arm.upper.rotation.z, state === "grounded" ? -arm.side * 0.1 : -arm.side * 0.42, step);
-    arm.lower.rotation.x = approach(arm.lower.rotation.x, state === "grounded" ? -Math.max(0, -groundSwing) * 0.35 : -0.58, step);
+    arm.upper.rotation.x = approach(arm.upper.rotation.x, state === "grounded" ? groundSwing : -0.2, step);
+    arm.upper.rotation.z = approach(arm.upper.rotation.z, state === "grounded" ? -arm.side * 0.1 : -arm.side * 0.16, step);
+    arm.lower.rotation.x = approach(arm.lower.rotation.x, state === "grounded" ? -Math.max(0, -groundSwing) * 0.35 : 2.52, step);
   }
   for (const leg of model.legs) {
     const legSwing = gait * legStride * leg.side;
@@ -241,6 +105,7 @@ export function updateParachutistModel(root, state, speed, dt) {
     leg.upper.rotation.x = approach(leg.upper.rotation.x, state === "grounded" ? legSwing : 0.72, step);
     leg.lower.rotation.x = approach(leg.lower.rotation.x, state === "grounded" ? -Math.max(0, legSwing) * 0.62 : -1.05, step);
   }
+  if (rig.canopy.visible) updateParachutistSuspension(rig.canopy);
 }
 
 export function setParachutistFirstPerson(root, enabled) {
