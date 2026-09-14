@@ -13,11 +13,11 @@
     <meta property="og:type" content="website" />
     <meta name="twitter:card" content="summary_large_image" />
     <link rel="icon" href="data:," />
-    <script type="module" crossorigin src="./assets/index-JZc2-AkP.js"></script>
-    <link rel="modulepreload" crossorigin href="./assets/three-B4KzQAE_.js">
-    <link rel="modulepreload" crossorigin href="./assets/terrain-BnDZ80GO.js">
+    <script type="module" crossorigin src="./assets/index-B2UFRoBw.js"></script>
+    <link rel="modulepreload" crossorigin href="./assets/three-D30tnyVc.js">
+    <link rel="modulepreload" crossorigin href="./assets/terrain-D-7WIx4X.js">
     <link rel="modulepreload" crossorigin href="./assets/multiplayer-6Y2Ft8ec.js">
-    <link rel="stylesheet" crossorigin href="./assets/index-BEzm6Xlz.css">
+    <link rel="stylesheet" crossorigin href="./assets/index-BarqBE-4.css">
   </head>
   <body>
     <div id="multiplayer-notice" role="alert" aria-live="assertive" hidden></div>
@@ -40,14 +40,17 @@
     </div>
 
     <div id="landing">
-      <div class="menu-card landing-card">
-        <h1 class="brand-logo"><img src="./assets/flight-over-the-world-plus-logo.png" width="2172" height="724" alt="Flight Over the World +" decoding="async" fetchpriority="high" /></h1>
-        <p class="landing-sub">Fly <span class="anywhere-word">anywhere</span>. No account or setup needed.</p>
-        <p id="crash-note" hidden></p>
-        <div class="landing-modes">
-          <button id="btn-solo" type="button">Single player</button>
-          <button id="btn-multi" type="button">Multiplayer</button>
+      <div class="landing-menu-stack">
+        <div class="menu-card landing-card">
+          <h1 class="brand-logo"><img src="./assets/flight-over-the-world-plus-logo.png" width="2172" height="724" alt="Flight Over the World +" decoding="async" fetchpriority="high" /></h1>
+          <p class="landing-sub">Fly <span class="anywhere-word">anywhere</span>. No account or setup needed.</p>
+          <p id="crash-note" hidden></p>
+          <div class="landing-modes">
+            <button id="btn-solo" type="button">Single player</button>
+            <button id="btn-multi" type="button">Multiplayer</button>
+          </div>
         </div>
+        <button id="music-landing-toggle" class="menu-music-toggle" type="button" aria-pressed="false">🔊 Music on</button>
       </div>
     </div>
 
@@ -66,6 +69,11 @@
         </div>
         <p id="lobby-vehicle-lock-status" class="lobby-vehicle-lock-status" role="status" hidden></p>
         <button id="music-lobby-toggle" class="menu-music-toggle" type="button" aria-pressed="false">🔊 Music on</button>
+        <div class="ambient-volume-control">
+          <label for="ambient-lobby-volume">Ambient sounds</label>
+          <output id="ambient-lobby-value" for="ambient-lobby-volume">100%</output>
+          <input id="ambient-lobby-volume" type="range" min="0" max="100" step="1" value="100" title="Engine and wind volume" />
+        </div>
         <div class="modes lobby-modes single-mode">
           <button class="mode-card selected" data-mode="free" type="button">
             <span class="m-name">Free flight</span>
@@ -124,6 +132,11 @@
           <span id="car-desc">Light propeller – 170 km/h</span>
         </div>
         <button id="music-menu-toggle" class="menu-music-toggle" type="button" aria-pressed="false">🔊 Music on</button>
+        <div class="ambient-volume-control">
+          <label for="ambient-menu-volume">Ambient sounds</label>
+          <output id="ambient-menu-value" for="ambient-menu-volume">100%</output>
+          <input id="ambient-menu-volume" type="range" min="0" max="100" step="1" value="100" title="Engine and wind volume" />
+        </div>
 
         <div class="modes single-mode">
           <button class="mode-card selected" data-mode="free" type="button">
@@ -223,7 +236,14 @@
     </div>
 
     <div id="game-tools" hidden aria-label="Game controls">
-      <button id="music-game-toggle" type="button" aria-pressed="false">🔊 Music on</button>
+      <div class="audio-game-controls">
+        <button id="music-game-toggle" type="button" aria-pressed="false">🔊 Music on</button>
+        <div class="ambient-volume-control">
+          <label for="ambient-game-volume">Ambient sounds</label>
+          <output id="ambient-game-value" for="ambient-game-volume">100%</output>
+          <input id="ambient-game-volume" type="range" min="0" max="100" step="1" value="100" title="Engine and wind volume" />
+        </div>
+      </div>
       <button id="landscape-toggle" type="button" aria-pressed="false" aria-label="Switch to landscape view" title="Landscape view">↻</button>
       <button id="acro-smoke-toggle" class="acro-control" type="button" aria-pressed="true">Smoke on · Z</button>
     </div>
