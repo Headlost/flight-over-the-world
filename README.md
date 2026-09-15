@@ -2,11 +2,12 @@
 
 [![Flight Over the World + — główne zdjęcie z lotu nad miastem](Flight%20over%20the%20word%20picture/glowne.png)](Flight%20over%20the%20word%20picture/glowne.png)
 
-# Flight Over the World + — gra online
+# Flight Over the World + — wersja archiwalna
 
-**Graj:** https://headlost.github.io/flight-over-the-world/
+> [!IMPORTANT]
+> Prace nad tą wersją zostały zakończone, a repozytorium jest archiwalne. Główny projekt, rozwijany z nowym mechanizmem renderowania i nowymi modelami, znajduje się w [Headlost/flight-over-the-world-plus](https://github.com/Headlost/flight-over-the-world-plus).
 
-Otwórz stronę, wybierz pojazd i rozpocznij **Free flight**. Gracz nie zakłada konta, nie instaluje programu i nie wpisuje żadnych tokenów ani kluczy. **Dziki dzik** rozpoczyna lot 180 m nad powierzchnią i pozwala wykonywać bardzo szybkie zwroty, pełne pętle i beczki z dwiema białymi smugami dymu. **Parachutist** i **Rocket** pozwalają wylądować, chodzić, ponownie wystartować, wejść na orbitę, odwiedzać planety i odkryć pełną sekwencję czarnej dziury.
+Pozostała część dokumentu opisuje nieaktywną, historyczną wersję projektu. Stara strona gry została wyłączona.
 
 ## Zdjęcia z rozgrywki
 
